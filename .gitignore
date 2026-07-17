@@ -1,0 +1,5 @@
+data/
+bin/
+dist/
+.DS_Store
+spark-server-plan.md

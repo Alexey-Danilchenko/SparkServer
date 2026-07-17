@@ -1,0 +1,27 @@
+{
+  "DEFAULT_ADMIN_USERNAME": "__admin__",
+  "DEFAULT_ADMIN_PASSWORD": "adminPassword",
+  "DEVICE_DIRECTORY": "data/devices",
+  "DEVICE_CLAIMS_DIRECTORY": "data/deviceClaims",
+  "EVENTS_DIRECTORY": "data/events",
+  "FIRMWARE_DIRECTORY": "data/knownApps",
+  "PRODUCTS_DIRECTORY": "data/products",
+  "USERS_DIRECTORY": "data/users",
+  "TOKENS_DIRECTORY": "data/accessTokens",
+  "WEBHOOKS_DIRECTORY": "data/webhooks",
+  "SERVER_KEYS_DIRECTORY": "data",
+  "LOGIN_ROUTE": "/oauth/token",
+  "ACCESS_TOKEN_LIFETIME": 7776000,
+  "API_TIMEOUT": 30000,
+  "EXPRESS_SERVER_CONFIG": {
+    "HOST": "0.0.0.0",
+    "PORT": 8080
+  },
+  "TCP_DEVICE_SERVER_CONFIG": {
+    "HOST": "0.0.0.0",
+    "PORT": 5683
+  },
+  "DB_CONFIG": {
+    "DB_TYPE": "file"
+  }
+}
