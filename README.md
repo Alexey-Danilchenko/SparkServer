@@ -2,6 +2,8 @@
 
 Spark Server Go is a Go port of the [Brewskey `spark-server`](https://github.com/Brewskey/spark-server) local cloud. The goal is to preserve compatibility with Particle/Spark local cloud behavior while moving the implementation from TypeScript/Node.js to a modular Go service.
 
+This project was vibe-coded with Codex LLM.
+
 ## Current Scope
 
 This repository contains a file-backed Go implementation of the Spark/Particle local cloud path needed for local development and final real-device smoke testing:
