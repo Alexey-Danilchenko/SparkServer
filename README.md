@@ -168,6 +168,91 @@ Global flags:
 - `-username` and `-password` perform automatic login, or use `SPARK_USERNAME` and `SPARK_PASSWORD`.
 - `-json` prints machine-readable JSON for scripts.
 
+## Getting started with Particle devices
+
+1. Run the server with:
+
+```sh
+./bin/spark-server
+```
+
+2. Watch for your IP address, you'll see something like:
+
+```
+"spark server started" http=192.168.0.2:8080 tcp=192.168.0.2:5683
+```
+
+3. We will now create a new server profile on Particle-CLI using the command:
+
+```
+particle config profile_name apiUrl  "http://DOMAIN_OR_IP"
+```
+
+For the local cloud, the port number 8080 needs to be added behind: `http://domain_or_ip:8080`. It is important to also have the `http://` otherwise it won't work.
+
+This will create a new profile to point to your server and switching back to the spark cloud is simply `particle config particle` and other profiles would be `particle config profile_name`
+
+4. We will now point over to the local cloud using
+
+```
+particle config profile_name
+```
+
+5. On a separate CMD from the one running the server, type
+
+```
+particle login --username __admin__ --password adminPassword
+```
+
+The default username is `__admin__` and password is `adminPassword`.
+
+This will create an account on the local cloud
+_This creates a config file located in the `%userprofile%/.particle%` folder_
+
+Perform CTRL + C once you logon with Particle-CLI asking you to send Wifi-credentials etc...
+
+6. Put your core into listening mode, and run
+
+```
+particle identify
+```
+
+to get your core id. You'll need this id later
+
+7. The next steps will generate a bunch of keys for your device. I recommend `mkdir ..\temp` and `cd ..\temp`
+
+8. Put your device in DFU mode.
+
+9. Change server keys to local cloud key + IP Address
+
+```
+particle keys server ..\spark-server\data\default_key.pub.pem --host IP_ADDRESS --protocol tcp
+```
+
+**Note You can go back to using the particle cloud by [downloading the public key here](https://s3.amazonaws.com/spark-website/cloud_public.der).**
+You'll need to run `particle config particle`, `particle keys server cloud_public.der`, and `particle keys doctor your_core_id` while your device is in DFU mode.
+
+10. Create and provision access on your local cloud with the keys doctor:
+
+```
+   particle keys doctor your_core_id
+```
+
+**Note For Electrons and probably all newer hardware you need to run these commands**
+There is either a bug in the CLI or Particle always expects these newer devices to use UDP.
+
+Put your device in DFU mode and then:
+
+```
+particle keys new test_key --protocol tcp
+particle keys load test_key.der
+particle keys send XXXXXXXXXXXXXXXXXXXXXXXX test_key.pub.pem
+```
+
+---
+
+At this point you should be able to run normal cloud commands and flash binaries. You can add any webhooks you need, call functions, or get variable values.
+
 ## Auth Routes
 
 Implemented auth endpoints:
@@ -313,7 +398,6 @@ The loader accepts the legacy-style config keys used bu Brewskey SparkServer:
   "ACCESS_TOKEN_LIFETIME": 7776000,
   "API_TIMEOUT": 30000,
   "EXPRESS_SERVER_CONFIG": {
-    "HOST": "0.0.0.0",
     "PORT": 8080
   },
   "TCP_DEVICE_SERVER_CONFIG": {
