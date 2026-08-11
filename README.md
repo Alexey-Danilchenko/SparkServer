@@ -142,8 +142,8 @@ See `RELEASE.md` for versioning, release-candidate checks, and GitHub release wo
 
 If `settings.json` is missing, the server starts with defaults:
 
-- HTTP: `0.0.0.0:8080`
-- TCP: `0.0.0.0:5683`
+- HTTP port: `8080`, listening on all local interfaces
+- TCP device port: `5683`, listening on all local interfaces
 - Admin user: `__admin__`
 - Admin password: `adminPassword`
 - File storage under `data/`
@@ -176,10 +176,12 @@ Global flags:
 ./bin/spark-server
 ```
 
-2. Watch for your IP address, you'll see something like:
+2. Watch for your local IP address. Each listener and the combined server startup are logged:
 
 ```
-"spark server started" http=192.168.0.2:8080 tcp=192.168.0.2:5683
+time=2026-08-10T22:16:07.206+01:00 level=INFO msg="http listener started" server=http address=192.168.0.5:8080
+time=2026-08-10T22:16:07.206+01:00 level=INFO msg="tcp listener started" server=tcp address=192.168.0.5:5683
+time=2026-08-10T22:16:07.206+01:00 level=INFO msg="spark server started" http=192.168.0.5:8080 tcp=192.168.0.5:5683
 ```
 
 3. We will now create a new server profile on Particle-CLI using the command:
@@ -401,7 +403,6 @@ The loader accepts the legacy-style config keys used bu Brewskey SparkServer:
     "PORT": 8080
   },
   "TCP_DEVICE_SERVER_CONFIG": {
-    "HOST": "0.0.0.0",
     "PORT": 5683
   },
   "DB_CONFIG": {
@@ -409,6 +410,8 @@ The loader accepts the legacy-style config keys used bu Brewskey SparkServer:
   }
 }
 ```
+
+Both listeners bind their configured port on all local interfaces. Their reachable local IP addresses are detected and printed in the startup logs.
 
 See `examples/settings.file.json` for a ready-to-copy file-backed configuration.
 

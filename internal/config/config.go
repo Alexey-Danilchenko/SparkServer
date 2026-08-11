@@ -10,9 +10,7 @@ import (
 )
 
 const (
-	defaultHTTPHost = "0.0.0.0"
 	defaultHTTPPort = 8080
-	defaultTCPHost  = "0.0.0.0"
 	defaultTCPPort  = 5683
 )
 
@@ -39,14 +37,12 @@ type Config struct {
 
 // HTTPConfig describes the REST/SSE API listener.
 type HTTPConfig struct {
-	Host string `json:"HOST"`
-	Port int    `json:"PORT"`
+	Port int `json:"PORT"`
 }
 
 // TCPConfig describes the Particle device TCP listener.
 type TCPConfig struct {
-	Host string `json:"HOST"`
-	Port int    `json:"PORT"`
+	Port int `json:"PORT"`
 }
 
 // DBConfig records the configured persistence backend; file is currently implemented.
@@ -73,11 +69,9 @@ func Default() *Config {
 		AccessTokenLifetime:   7776000,
 		APITimeout:            30000,
 		HTTP: HTTPConfig{
-			Host: defaultHTTPHost,
 			Port: defaultHTTPPort,
 		},
 		TCP: TCPConfig{
-			Host: defaultTCPHost,
 			Port: defaultTCPPort,
 		},
 		DB: DBConfig{
@@ -179,14 +173,8 @@ func (c *Config) applyDefaults() {
 	if c.APITimeout == 0 {
 		c.APITimeout = 30000
 	}
-	if c.HTTP.Host == "" {
-		c.HTTP.Host = defaultHTTPHost
-	}
 	if c.HTTP.Port == 0 {
 		c.HTTP.Port = defaultHTTPPort
-	}
-	if c.TCP.Host == "" {
-		c.TCP.Host = defaultTCPHost
 	}
 	if c.TCP.Port == 0 {
 		c.TCP.Port = defaultTCPPort
@@ -196,12 +184,12 @@ func (c *Config) applyDefaults() {
 	}
 }
 
-// Address returns the host:port pair used by net/http.
+// Address returns the all-interface bind address used by net/http.
 func (c HTTPConfig) Address() string {
-	return net.JoinHostPort(c.Host, fmt.Sprintf("%d", c.Port))
+	return net.JoinHostPort("", fmt.Sprintf("%d", c.Port))
 }
 
-// Address returns the host:port pair used by the device TCP server.
+// Address returns the all-interface bind address used by the device TCP server.
 func (c TCPConfig) Address() string {
-	return net.JoinHostPort(c.Host, fmt.Sprintf("%d", c.Port))
+	return net.JoinHostPort("", fmt.Sprintf("%d", c.Port))
 }

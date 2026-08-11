@@ -17,7 +17,6 @@ func TestLoadSettingsJSONWithDefaults(t *testing.T) {
 	settings := []byte(`{
 		"DEFAULT_ADMIN_USERNAME": "admin",
 		"EXPRESS_SERVER_CONFIG": {
-			"HOST": "127.0.0.1",
 			"PORT": 18080
 		}
 	}`)
@@ -34,10 +33,10 @@ func TestLoadSettingsJSONWithDefaults(t *testing.T) {
 	if cfg.DefaultAdminUsername != "admin" {
 		t.Fatalf("DefaultAdminUsername = %q", cfg.DefaultAdminUsername)
 	}
-	if cfg.HTTP.Address() != "127.0.0.1:18080" {
+	if cfg.HTTP.Address() != ":18080" {
 		t.Fatalf("HTTP address = %q", cfg.HTTP.Address())
 	}
-	if cfg.TCP.Address() != "0.0.0.0:5683" {
+	if cfg.TCP.Address() != ":5683" {
 		t.Fatalf("TCP address = %q", cfg.TCP.Address())
 	}
 	if cfg.DB.Type != "file" {

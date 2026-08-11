@@ -13,8 +13,8 @@ Status values:
 
 | Area | Status | Notes |
 | --- | --- | --- |
-| HTTP API listener | Implemented | Defaults to `0.0.0.0:8080`. |
-| TCP device listener | Implemented | Defaults to `0.0.0.0:5683`. |
+| HTTP API listener | Implemented | Binds port `8080` on all local interfaces by default. |
+| TCP device listener | Implemented | Binds port `5683` on all local interfaces by default. |
 | File-backed persistence | Implemented | Runtime data is stored under `data/` by default. |
 | NeDB persistence | Intentionally unsupported | Go port uses JSON file stores rather than emulating NeDB internals. |
 | MongoDB persistence | Future extension | Planned after file-backed release completion. |

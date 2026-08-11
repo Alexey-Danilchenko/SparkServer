@@ -8,8 +8,10 @@ import (
 	"log/slog"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"sparkserver/internal/netutil"
 	"sparkserver/internal/protocol/coap"
 	"sparkserver/internal/protocol/session"
 )
@@ -37,16 +39,17 @@ type AfterResponseHandler interface {
 
 // Server accepts device TCP connections and maintains live command clients.
 type Server struct {
-	address      string
-	logger       *slog.Logger
-	listener     net.Listener
-	done         chan struct{}
-	registry     *Registry
-	deviceStatus DeviceStatusUpdater
-	handshaker   Handshaker
-	handler      MessageHandler
-	flashSignals FlashSignalHandler
-	mu           sync.Mutex
+	address         string
+	listenerAddress atomic.Value
+	logger          *slog.Logger
+	listener        net.Listener
+	done            chan struct{}
+	registry        *Registry
+	deviceStatus    DeviceStatusUpdater
+	handshaker      Handshaker
+	handler         MessageHandler
+	flashSignals    FlashSignalHandler
+	mu              sync.Mutex
 }
 
 // New creates a TCP server with an empty device registry.
@@ -158,13 +161,26 @@ func (s *Server) Start(ctx context.Context) error {
 		return err
 	}
 
+	listenerAddress := netutil.AdvertisedAddress(listener.Addr())
+	s.listenerAddress.Store(listenerAddress)
+
 	s.mu.Lock()
 	s.listener = listener
 	s.mu.Unlock()
 
-	s.logger.Info("tcp listener started", "address", listener.Addr().String())
+	s.logger.Info("tcp listener started", "address", listenerAddress)
 	go s.accept(ctx, listener)
 	return nil
+}
+
+// ListenerAddress returns the reachable address reported for the active listener.
+func (s *Server) ListenerAddress() string {
+	address := s.listenerAddress.Load()
+	if address == nil {
+		return ""
+	}
+
+	return address.(string)
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {

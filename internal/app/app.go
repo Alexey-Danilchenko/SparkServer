@@ -132,7 +132,7 @@ func (s *Server) Start(ctx context.Context) error {
 		return errors.Join(err, httpErr)
 	}
 
-	s.logger.Info("spark server started", "http", s.config.HTTP.Address(), "tcp", s.config.TCP.Address())
+	s.logger.Info("spark server started", "http", s.http.ListenerAddress(), "tcp", s.tcp.ListenerAddress())
 	return nil
 }
 

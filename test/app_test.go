@@ -2,11 +2,12 @@
 package test
 
 import (
+	"bytes"
 	"context"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,9 +18,7 @@ import (
 func TestServerStartAndShutdown(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Default()
-	cfg.HTTP.Host = "127.0.0.1"
 	cfg.HTTP.Port = 0
-	cfg.TCP.Host = "127.0.0.1"
 	cfg.TCP.Port = 0
 	cfg.DeviceDirectory = filepath.Join(dir, "devices")
 	cfg.DeviceClaimsDirectory = filepath.Join(dir, "deviceClaims")
@@ -30,7 +29,8 @@ func TestServerStartAndShutdown(t *testing.T) {
 	cfg.WebhooksDirectory = filepath.Join(dir, "webhooks")
 	cfg.ServerKeysDirectory = filepath.Join(dir, "data")
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
 	server := app.New(cfg, logger)
 
 	if err := server.Start(context.Background()); err != nil {
@@ -42,6 +42,20 @@ func TestServerStartAndShutdown(t *testing.T) {
 
 	if err := server.Shutdown(ctx); err != nil {
 		t.Fatalf("shutdown server: %v", err)
+	}
+
+	output := logs.String()
+	for _, message := range []string{
+		"msg=\"http listener started\" server=http address=",
+		"msg=\"tcp listener started\" server=tcp address=",
+		"msg=\"spark server started\" http=",
+	} {
+		if !strings.Contains(output, message) {
+			t.Fatalf("logs do not contain %q:\n%s", message, output)
+		}
+	}
+	if strings.Contains(output, "0.0.0.0:") || strings.Contains(output, "[::]:") {
+		t.Fatalf("logs contain a wildcard listener address:\n%s", output)
 	}
 
 	for _, path := range []string{

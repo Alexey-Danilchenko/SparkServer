@@ -9,12 +9,14 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"sparkserver/internal/auth"
 	"sparkserver/internal/devices"
 	"sparkserver/internal/domain"
 	"sparkserver/internal/events"
+	"sparkserver/internal/netutil"
 	"sparkserver/internal/repository"
 )
 
@@ -25,9 +27,10 @@ type DeviceKeyRegistrar interface {
 
 // Server wraps net/http with the configured route tree and lifecycle methods.
 type Server struct {
-	address string
-	logger  *slog.Logger
-	server  *http.Server
+	address         string
+	listenerAddress atomic.Value
+	logger          *slog.Logger
+	server          *http.Server
 }
 
 // New builds an HTTP server with the core auth/device/event API surface.
@@ -270,7 +273,10 @@ func (s *Server) Start() error {
 		return err
 	}
 
-	s.logger.Info("http listener started", "address", listener.Addr().String())
+	listenerAddress := netutil.AdvertisedAddress(listener.Addr())
+	s.listenerAddress.Store(listenerAddress)
+
+	s.logger.Info("http listener started", "address", listenerAddress)
 	go func() {
 		if err := s.server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			s.logger.Error("http server stopped", "error", err)
@@ -278,6 +284,16 @@ func (s *Server) Start() error {
 	}()
 
 	return nil
+}
+
+// ListenerAddress returns the reachable address reported for the active listener.
+func (s *Server) ListenerAddress() string {
+	address := s.listenerAddress.Load()
+	if address == nil {
+		return ""
+	}
+
+	return address.(string)
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
