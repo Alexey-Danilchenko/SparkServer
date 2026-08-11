@@ -3,8 +3,10 @@ package httpapi
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -31,66 +33,75 @@ type Server struct {
 	listenerAddress atomic.Value
 	logger          *slog.Logger
 	server          *http.Server
+	tls             TLSConfig
+}
+
+// TLSConfig controls HTTPS for the HTTP API listener.
+type TLSConfig struct {
+	Enabled         bool
+	CertificateFile string
+	PrivateKeyFile  string
 }
 
 // New builds an HTTP server with the core auth/device/event API surface.
 func New(
-	address       string,
-	authService   *auth.Service,
+	address string,
+	authService *auth.Service,
 	deviceService *devices.Service,
-	eventService  *events.Service,
-	logger        *slog.Logger,
+	eventService *events.Service,
+	logger *slog.Logger,
 ) *Server {
 	return NewWithFirmware(address, authService, deviceService, eventService, nil, logger)
 }
 
 func NewWithFirmware(
-	address         string,
-	authService     *auth.Service,
-	deviceService   *devices.Service,
-	eventService    *events.Service,
+	address string,
+	authService *auth.Service,
+	deviceService *devices.Service,
+	eventService *events.Service,
 	firmwareService FirmwareService,
-	logger          *slog.Logger,
+	logger *slog.Logger,
 ) *Server {
 	return NewWithFirmwareAndProducts(address, authService, deviceService, eventService, firmwareService, nil, logger)
 }
 
 func NewWithFirmwareAndProducts(
-	address         string,
-	authService     *auth.Service,
-	deviceService   *devices.Service,
-	eventService    *events.Service,
+	address string,
+	authService *auth.Service,
+	deviceService *devices.Service,
+	eventService *events.Service,
 	firmwareService FirmwareService,
-	productService  ProductService,
-	logger          *slog.Logger,
+	productService ProductService,
+	logger *slog.Logger,
 ) *Server {
 	return NewWithServices(address, authService, deviceService, eventService, firmwareService, productService, nil, logger)
 }
 
 func NewWithServices(
-	address         string,
-	authService     *auth.Service,
-	deviceService   *devices.Service,
-	eventService    *events.Service,
+	address string,
+	authService *auth.Service,
+	deviceService *devices.Service,
+	eventService *events.Service,
 	firmwareService FirmwareService,
-	productService  ProductService,
-	webhookService  WebhookService,
-	logger          *slog.Logger,
+	productService ProductService,
+	webhookService WebhookService,
+	logger *slog.Logger,
 ) *Server {
-	return NewWithDeviceKeys(address, authService, deviceService, eventService, firmwareService, productService, webhookService, nil, logger)
+	return NewWithDeviceKeys(address, authService, deviceService, eventService, firmwareService, productService, webhookService, nil, TLSConfig{}, logger)
 }
 
 // NewWithDeviceKeys builds the full file-backed HTTP API including provisioning keys.
 func NewWithDeviceKeys(
-	address         string,
-	authService     *auth.Service,
-	deviceService   *devices.Service,
-	eventService    *events.Service,
+	address string,
+	authService *auth.Service,
+	deviceService *devices.Service,
+	eventService *events.Service,
 	firmwareService FirmwareService,
-	productService  ProductService,
-	webhookService  WebhookService,
-	keyRegistrar    DeviceKeyRegistrar,
-	logger          *slog.Logger,
+	productService ProductService,
+	webhookService WebhookService,
+	keyRegistrar DeviceKeyRegistrar,
+	tlsConfig TLSConfig,
+	logger *slog.Logger,
 ) *Server {
 	if logger == nil {
 		logger = slog.Default()
@@ -99,6 +110,7 @@ func NewWithDeviceKeys(
 	return &Server{
 		address: address,
 		logger:  logger,
+		tls:     tlsConfig,
 		server: &http.Server{
 			Addr:              address,
 			Handler:           NewHandlerWithDeviceKeys(authService, deviceService, eventService, firmwareService, productService, webhookService, keyRegistrar, logger),
@@ -108,57 +120,57 @@ func NewWithDeviceKeys(
 }
 
 func NewHandler(
-	authService   *auth.Service,
+	authService *auth.Service,
 	deviceService *devices.Service,
-	eventService  *events.Service,
-	logger        *slog.Logger,
+	eventService *events.Service,
+	logger *slog.Logger,
 ) http.Handler {
 	return NewHandlerWithFirmware(authService, deviceService, eventService, nil, logger)
 }
 
 func NewHandlerWithFirmware(
-	authService     *auth.Service,
-	deviceService   *devices.Service,
-	eventService    *events.Service,
+	authService *auth.Service,
+	deviceService *devices.Service,
+	eventService *events.Service,
 	firmwareService FirmwareService,
-	logger          *slog.Logger,
+	logger *slog.Logger,
 ) http.Handler {
 	return NewHandlerWithFirmwareAndProducts(authService, deviceService, eventService, firmwareService, nil, logger)
 }
 
 func NewHandlerWithFirmwareAndProducts(
-	authService     *auth.Service,
-	deviceService   *devices.Service,
-	eventService    *events.Service,
+	authService *auth.Service,
+	deviceService *devices.Service,
+	eventService *events.Service,
 	firmwareService FirmwareService,
-	productService  ProductService,
-	logger          *slog.Logger,
+	productService ProductService,
+	logger *slog.Logger,
 ) http.Handler {
 	return NewHandlerWithServices(authService, deviceService, eventService, firmwareService, productService, nil, logger)
 }
 
 func NewHandlerWithServices(
-	authService     *auth.Service,
-	deviceService   *devices.Service,
-	eventService    *events.Service,
+	authService *auth.Service,
+	deviceService *devices.Service,
+	eventService *events.Service,
 	firmwareService FirmwareService,
-	productService  ProductService,
-	webhookService  WebhookService,
-	logger          *slog.Logger,
+	productService ProductService,
+	webhookService WebhookService,
+	logger *slog.Logger,
 ) http.Handler {
 	return NewHandlerWithDeviceKeys(authService, deviceService, eventService, firmwareService, productService, webhookService, nil, logger)
 }
 
 // NewHandlerWithDeviceKeys registers v1/v2 compatibility routes onto a ServeMux.
 func NewHandlerWithDeviceKeys(
-	authService     *auth.Service,
-	deviceService   *devices.Service,
-	eventService    *events.Service,
+	authService *auth.Service,
+	deviceService *devices.Service,
+	eventService *events.Service,
 	firmwareService FirmwareService,
-	productService  ProductService,
-	webhookService  WebhookService,
-	keyRegistrar    DeviceKeyRegistrar,
-	logger          *slog.Logger,
+	productService ProductService,
+	webhookService WebhookService,
+	keyRegistrar DeviceKeyRegistrar,
+	logger *slog.Logger,
 ) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
@@ -273,17 +285,52 @@ func (s *Server) Start() error {
 		return err
 	}
 
+	serverListener, err := s.serverListener(listener)
+	if err != nil {
+		_ = listener.Close()
+		return err
+	}
+
 	listenerAddress := netutil.AdvertisedAddress(listener.Addr())
 	s.listenerAddress.Store(listenerAddress)
 
-	s.logger.Info("http listener started", "address", listenerAddress)
+	message := "http listener started"
+	if s.tls.Enabled {
+		message = "https listener started"
+	}
+	s.logger.Info(message, "address", listenerAddress)
 	go func() {
-		if err := s.server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			s.logger.Error("http server stopped", "error", err)
+		if err := s.server.Serve(serverListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			message = "http listener stopped"
+			if s.tls.Enabled {
+				message = "https listener stopped"
+			}
+			s.logger.Error(message, "error", err)
 		}
 	}()
 
 	return nil
+}
+
+func (s *Server) serverListener(listener net.Listener) (net.Listener, error) {
+	if !s.tls.Enabled {
+		return listener, nil
+	}
+	if s.tls.CertificateFile == "" {
+		return nil, errors.New("SSL_CERTIFICATE_FILEPATH is required when USE_SSL is true")
+	}
+	if s.tls.PrivateKeyFile == "" {
+		return nil, errors.New("SSL_PRIVATE_KEY_FILEPATH is required when USE_SSL is true")
+	}
+
+	certificate, err := tls.LoadX509KeyPair(s.tls.CertificateFile, s.tls.PrivateKeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("load HTTPS certificate: %w", err)
+	}
+
+	return tls.NewListener(listener, &tls.Config{
+		Certificates: []tls.Certificate{certificate},
+	}), nil
 }
 
 // ListenerAddress returns the reachable address reported for the active listener.

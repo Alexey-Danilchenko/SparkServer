@@ -37,7 +37,10 @@ type Config struct {
 
 // HTTPConfig describes the REST/SSE API listener.
 type HTTPConfig struct {
-	Port int `json:"PORT"`
+	Port                   int    `json:"PORT"`
+	UseSSL                 bool   `json:"USE_SSL"`
+	SSLCertificateFilePath string `json:"SSL_CERTIFICATE_FILEPATH"`
+	SSLPrivateKeyFilePath  string `json:"SSL_PRIVATE_KEY_FILEPATH"`
 }
 
 // TCPConfig describes the Particle device TCP listener.

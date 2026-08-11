@@ -381,7 +381,7 @@ Published events trigger matching webhooks. Webhook `event` values can be exact 
 
 ## Configuration
 
-The loader accepts the legacy-style config keys used bu Brewskey SparkServer:
+The loader accepts the legacy-style config keys used by Brewskey SparkServer:
 
 ```json
 {
@@ -400,7 +400,10 @@ The loader accepts the legacy-style config keys used bu Brewskey SparkServer:
   "ACCESS_TOKEN_LIFETIME": 7776000,
   "API_TIMEOUT": 30000,
   "EXPRESS_SERVER_CONFIG": {
-    "PORT": 8080
+    "PORT": 8080,
+    "USE_SSL": false,
+    "SSL_CERTIFICATE_FILEPATH": null,
+    "SSL_PRIVATE_KEY_FILEPATH": null
   },
   "TCP_DEVICE_SERVER_CONFIG": {
     "PORT": 5683
@@ -411,7 +414,18 @@ The loader accepts the legacy-style config keys used bu Brewskey SparkServer:
 }
 ```
 
-Both listeners bind their configured port on all local interfaces. Their reachable local IP addresses are detected and printed in the startup logs.
+To serve the API over HTTPS, set `USE_SSL` to `true` and provide PEM certificate and private-key paths:
+
+```json
+"EXPRESS_SERVER_CONFIG": {
+  "PORT": 443,
+  "USE_SSL": true,
+  "SSL_CERTIFICATE_FILEPATH": "/etc/letsencrypt/live/example/fullchain.pem",
+  "SSL_PRIVATE_KEY_FILEPATH": "/etc/letsencrypt/live/example/privkey.pem"
+}
+```
+
+**NOTE:**`USE_SSL` does not change the port automatically; HTTPS uses the configured `PORT`. When enabled, startup logs report `https listener started`.
 
 See `examples/settings.file.json` for a ready-to-copy file-backed configuration.
 

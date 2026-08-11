@@ -14,6 +14,7 @@ Status values:
 | Area | Status | Notes |
 | --- | --- | --- |
 | HTTP API listener | Implemented | Binds port `8080` on all local interfaces by default. |
+| HTTPS API listener | Implemented | Enable with Brewskey-compatible certificate, private-key, and `USE_SSL` settings. |
 | TCP device listener | Implemented | Binds port `5683` on all local interfaces by default. |
 | File-backed persistence | Implemented | Runtime data is stored under `data/` by default. |
 | NeDB persistence | Intentionally unsupported | Go port uses JSON file stores rather than emulating NeDB internals. |

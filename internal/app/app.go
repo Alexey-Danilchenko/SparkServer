@@ -88,7 +88,22 @@ func New(cfg *config.Config, logger *slog.Logger) *Server {
 		products: productService,
 		webhooks: webhookService,
 		keys:     keyManager,
-		http:     httpapi.NewWithDeviceKeys(cfg.HTTP.Address(), authService, deviceService, eventService, firmwareService, productService, webhookService, keyManager, logger.With("server", "http")),
+		http: httpapi.NewWithDeviceKeys(
+			cfg.HTTP.Address(),
+			authService,
+			deviceService,
+			eventService,
+			firmwareService,
+			productService,
+			webhookService,
+			keyManager,
+			httpapi.TLSConfig{
+				Enabled:         cfg.HTTP.UseSSL,
+				CertificateFile: cfg.HTTP.SSLCertificateFilePath,
+				PrivateKeyFile:  cfg.HTTP.SSLPrivateKeyFilePath,
+			},
+			logger.With("server", "http"),
+		),
 		tcp:      tcpServer,
 	}
 }

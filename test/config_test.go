@@ -17,7 +17,10 @@ func TestLoadSettingsJSONWithDefaults(t *testing.T) {
 	settings := []byte(`{
 		"DEFAULT_ADMIN_USERNAME": "admin",
 		"EXPRESS_SERVER_CONFIG": {
-			"PORT": 18080
+			"PORT": 18443,
+			"USE_SSL": true,
+			"SSL_CERTIFICATE_FILEPATH": "cert.pem",
+			"SSL_PRIVATE_KEY_FILEPATH": "key.pem"
 		}
 	}`)
 
@@ -33,8 +36,17 @@ func TestLoadSettingsJSONWithDefaults(t *testing.T) {
 	if cfg.DefaultAdminUsername != "admin" {
 		t.Fatalf("DefaultAdminUsername = %q", cfg.DefaultAdminUsername)
 	}
-	if cfg.HTTP.Address() != ":18080" {
+	if cfg.HTTP.Address() != ":18443" {
 		t.Fatalf("HTTP address = %q", cfg.HTTP.Address())
+	}
+	if !cfg.HTTP.UseSSL {
+		t.Fatal("HTTP USE_SSL = false")
+	}
+	if cfg.HTTP.SSLCertificateFilePath != "cert.pem" {
+		t.Fatalf("HTTP certificate path = %q", cfg.HTTP.SSLCertificateFilePath)
+	}
+	if cfg.HTTP.SSLPrivateKeyFilePath != "key.pem" {
+		t.Fatalf("HTTP private key path = %q", cfg.HTTP.SSLPrivateKeyFilePath)
 	}
 	if cfg.TCP.Address() != ":5683" {
 		t.Fatalf("TCP address = %q", cfg.TCP.Address())
