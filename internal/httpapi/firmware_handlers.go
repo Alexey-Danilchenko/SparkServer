@@ -51,22 +51,6 @@ func listProductFirmwaresHandler(firmwareService FirmwareService) http.HandlerFu
 	}
 }
 
-func countProductFirmwaresHandler(firmwareService FirmwareService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if firmwareService == nil {
-			writeError(w, http.StatusServiceUnavailable, "firmware_unavailable")
-			return
-		}
-
-		firmwares, err := firmwareService.ListProductFirmware(r.Context(), r.PathValue("productIDOrSlug"))
-		if err != nil {
-			writeRepositoryError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, len(firmwares))
-	}
-}
-
 func uploadProductFirmwareHandler(firmwareService FirmwareService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if firmwareService == nil {

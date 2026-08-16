@@ -80,7 +80,7 @@ func TestProductFirmwareUploadAndListRoutes(t *testing.T) {
 		t.Fatalf("stat binary path: %v", err)
 	}
 
-	list := authedRequest(http.MethodGet, "/v2/products/brew-controller/firmwares", "", token)
+	list := authedRequest(http.MethodGet, "/v1/products/brew-controller/firmware", "", token)
 	listResponse := httptest.NewRecorder()
 	handler.ServeHTTP(listResponse, list)
 	if listResponse.Code != http.StatusOK {
@@ -99,7 +99,7 @@ func TestProductFirmwareUploadAndListRoutes(t *testing.T) {
 func TestProductFirmwareRawUploadRoute(t *testing.T) {
 	handler, token := newAuthenticatedFirmwareHandler(t)
 
-	request := authedRequest(http.MethodPost, "/v2/products/product-1/firmwares?filename=raw.bin", "\x01\x02", token)
+	request := authedRequest(http.MethodPost, "/v1/products/product-1/firmware?filename=raw.bin", "\x01\x02", token)
 	request.Header.Set("Content-Type", "application/octet-stream")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -120,7 +120,7 @@ func TestProductFirmwareRawUploadRoute(t *testing.T) {
 func TestProductFirmwareUpdateAndDeleteRoutes(t *testing.T) {
 	handler, token := newAuthenticatedFirmwareHandler(t)
 
-	upload := authedRequest(http.MethodPost, "/v2/products/product-1/firmwares?filename=raw.bin&version=1", "\x01\x02", token)
+	upload := authedRequest(http.MethodPost, "/v1/products/product-1/firmware?filename=raw.bin&version=1", "\x01\x02", token)
 	upload.Header.Set("Content-Type", "application/octet-stream")
 	uploadResponse := httptest.NewRecorder()
 	handler.ServeHTTP(uploadResponse, upload)
@@ -159,7 +159,7 @@ func TestProductFirmwareUpdateAndDeleteRoutes(t *testing.T) {
 	replacement := []byte{0x09, 0x08, 0x07}
 	binaryUpdate := authedRequest(
 		http.MethodPut,
-		"/v2/products/product-1/firmwares/"+firmwareID+"?filename=replacement.ota&current=true",
+		"/v1/products/product-1/firmware/"+firmwareID+"?filename=replacement.ota&current=true",
 		string(replacement),
 		token,
 	)
@@ -199,7 +199,7 @@ func TestProductFirmwareUpdateAndDeleteRoutes(t *testing.T) {
 		t.Fatalf("replacement binary still exists or stat failed unexpectedly: %v", err)
 	}
 
-	getDeleted := authedRequest(http.MethodGet, "/v2/products/product-1/firmwares/"+firmwareID, "", token)
+	getDeleted := authedRequest(http.MethodGet, "/v1/products/product-1/firmware/"+firmwareID, "", token)
 	getDeletedResponse := httptest.NewRecorder()
 	handler.ServeHTTP(getDeletedResponse, getDeleted)
 	if getDeletedResponse.Code != http.StatusNotFound {
@@ -210,7 +210,7 @@ func TestProductFirmwareUpdateAndDeleteRoutes(t *testing.T) {
 func TestProductFirmwareReleaseDefaultAndUpdateCheckRoutes(t *testing.T) {
 	handler, token := newAuthenticatedFirmwareHandler(t)
 
-	firstUpload := authedRequest(http.MethodPost, "/v2/products/product-1/firmwares?filename=v1.bin&version=1", "\x01", token)
+	firstUpload := authedRequest(http.MethodPost, "/v1/products/product-1/firmware?filename=v1.bin&version=1", "\x01", token)
 	firstUpload.Header.Set("Content-Type", "application/octet-stream")
 	firstResponse := httptest.NewRecorder()
 	handler.ServeHTTP(firstResponse, firstUpload)
@@ -218,7 +218,7 @@ func TestProductFirmwareReleaseDefaultAndUpdateCheckRoutes(t *testing.T) {
 		t.Fatalf("first upload status = %d body = %s", firstResponse.Code, firstResponse.Body.String())
 	}
 
-	secondUpload := authedRequest(http.MethodPost, "/v2/products/product-1/firmwares?filename=v2.bin&version=2", "\x02", token)
+	secondUpload := authedRequest(http.MethodPost, "/v1/products/product-1/firmware?filename=v2.bin&version=2", "\x02", token)
 	secondUpload.Header.Set("Content-Type", "application/octet-stream")
 	secondResponse := httptest.NewRecorder()
 	handler.ServeHTTP(secondResponse, secondUpload)
@@ -241,7 +241,7 @@ func TestProductFirmwareReleaseDefaultAndUpdateCheckRoutes(t *testing.T) {
 		t.Fatalf("release status = %d body = %s", releaseResponse.Code, releaseResponse.Body.String())
 	}
 
-	setDefault := authedRequest(http.MethodPut, "/v2/products/product-1/firmwares/"+second["id"].(string)+"/default", "", token)
+	setDefault := authedRequest(http.MethodPut, "/v1/products/product-1/firmware/"+second["id"].(string)+"/default", "", token)
 	defaultResponse := httptest.NewRecorder()
 	handler.ServeHTTP(defaultResponse, setDefault)
 	if defaultResponse.Code != http.StatusOK {
@@ -255,7 +255,7 @@ func TestProductFirmwareReleaseDefaultAndUpdateCheckRoutes(t *testing.T) {
 		t.Fatalf("default flags = %#v", defaultFirmware)
 	}
 
-	check := authedRequest(http.MethodGet, "/v2/products/product-1/firmwares/check?version=1", "", token)
+	check := authedRequest(http.MethodGet, "/v1/products/product-1/firmware/check?version=1", "", token)
 	checkResponse := httptest.NewRecorder()
 	handler.ServeHTTP(checkResponse, check)
 	if checkResponse.Code != http.StatusOK {
@@ -283,20 +283,6 @@ func TestProductFirmwareReleaseDefaultAndUpdateCheckRoutes(t *testing.T) {
 		t.Fatalf("no-update check = %#v", noUpdateBody)
 	}
 
-	count := authedRequest(http.MethodGet, "/v2/products/product-1/firmwares/count", "", token)
-	countResponse := httptest.NewRecorder()
-	handler.ServeHTTP(countResponse, count)
-	if countResponse.Code != http.StatusOK {
-		t.Fatalf("count status = %d body = %s", countResponse.Code, countResponse.Body.String())
-	}
-	var firmwareCount float64
-	if err := json.NewDecoder(countResponse.Body).Decode(&firmwareCount); err != nil {
-		t.Fatalf("decode firmware count: %v", err)
-	}
-	if firmwareCount != 2 {
-		t.Fatalf("firmware count = %v", firmwareCount)
-	}
-
 	getByVersion := authedRequest(http.MethodGet, "/v1/products/product-1/firmware/2", "", token)
 	getByVersionResponse := httptest.NewRecorder()
 	handler.ServeHTTP(getByVersionResponse, getByVersion)
@@ -315,7 +301,7 @@ func TestProductFirmwareReleaseDefaultAndUpdateCheckRoutes(t *testing.T) {
 func TestDeviceFlashJobRoutes(t *testing.T) {
 	handler, token, deviceService := newAuthenticatedFirmwareAndDeviceHandler(t)
 
-	upload := authedRequest(http.MethodPost, "/v2/products/product-1/firmwares?filename=flash.bin&current=true", "\x01\x02\x03", token)
+	upload := authedRequest(http.MethodPost, "/v1/products/product-1/firmware?filename=flash.bin&current=true", "\x01\x02\x03", token)
 	upload.Header.Set("Content-Type", "application/octet-stream")
 	uploadResponse := httptest.NewRecorder()
 	handler.ServeHTTP(uploadResponse, upload)
@@ -350,7 +336,7 @@ func TestDeviceFlashJobRoutes(t *testing.T) {
 		t.Fatalf("flash job = %#v", job)
 	}
 
-	list := authedRequest(http.MethodGet, "/v2/devices/device-1/flash", "", token)
+	list := authedRequest(http.MethodGet, "/v1/devices/device-1/flash", "", token)
 	listResponse := httptest.NewRecorder()
 	handler.ServeHTTP(listResponse, list)
 	if listResponse.Code != http.StatusOK {

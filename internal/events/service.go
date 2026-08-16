@@ -58,6 +58,7 @@ func (service *Service) Subscribe(ctx context.Context, filter Filter) <-chan dom
 	service.subscribers[id] = subscription{filter: filter, events: events}
 	service.mutex.Unlock()
 
+	// Cleanup of the resources - essentially destructor
 	go func() {
 		<-ctx.Done()
 		service.mutex.Lock()

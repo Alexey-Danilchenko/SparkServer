@@ -38,6 +38,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Block here until we terminate the server with below signals
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	<-stop

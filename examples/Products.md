@@ -69,20 +69,6 @@ curl -s "$BASE/v1/products" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-v2 equivalent:
-
-```sh
-curl -s "$BASE/v2/products" \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-### Count Products
-
-```sh
-curl -s "$BASE/v2/products/count" \
-  -H "Authorization: Bearer $TOKEN"
-```
-
 ### Create Product
 
 Spark Server Go accepts a simple JSON body. `slug` or `name` is required; `id` is optional.
@@ -167,20 +153,6 @@ curl -s "$BASE/v1/products/$PRODUCT/devices" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-v2 equivalent:
-
-```sh
-curl -s "$BASE/v2/products/$PRODUCT/devices" \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-### Count Product Devices
-
-```sh
-curl -s "$BASE/v2/products/$PRODUCT/devices/count" \
-  -H "Authorization: Bearer $TOKEN"
-```
-
 ### Add One Device
 
 The original Brewskey document describes both single-device and CSV import modes. Spark Server Go currently supports single-device association only.
@@ -248,20 +220,6 @@ curl -s "$BASE/v1/products/$PRODUCT/firmware" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-v2 equivalent:
-
-```sh
-curl -s "$BASE/v2/products/$PRODUCT/firmwares" \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-### Count Firmware
-
-```sh
-curl -s "$BASE/v2/products/$PRODUCT/firmwares/count" \
-  -H "Authorization: Bearer $TOKEN"
-```
-
 ### Upload Multipart Firmware
 
 ```sh
@@ -284,7 +242,7 @@ Accepted multipart file field names:
 ### Upload Raw Binary Firmware
 
 ```sh
-curl -s -X POST "$BASE/v2/products/$PRODUCT/firmwares?filename=firmware.bin&version=2&current=true" \
+curl -s -X POST "$BASE/v1/products/$PRODUCT/firmware?filename=firmware.bin&version=2&current=true" \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/octet-stream' \
   --data-binary @./firmware.bin
@@ -332,15 +290,13 @@ Supported metadata fields:
 Use `PUT` with a raw binary body when you rebuild locally and want to replace the binary behind an existing firmware record:
 
 ```sh
-curl -s -X PUT "$BASE/v2/products/$PRODUCT/firmwares/FIRMWARE_ID?filename=firmware.bin&current=true" \
+curl -s -X PUT "$BASE/v1/products/$PRODUCT/firmware/FIRMWARE_ID?filename=firmware.bin&current=true" \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/octet-stream' \
   --data-binary @./firmware.bin
 ```
 
 Multipart replacement is also accepted with the same file field names as upload.
-
-Brewskey documents firmware create/update/delete under v1 singular `/firmware`. Spark Server Go also accepts v2 plural `/firmwares` for convenience, but the v1 examples are the compatibility baseline.
 
 ### Delete Firmware
 
@@ -358,26 +314,12 @@ curl -s -X POST "$BASE/v1/products/$PRODUCT/firmware/FIRMWARE_ID/release" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-v2 equivalent:
-
-```sh
-curl -s -X PUT "$BASE/v2/products/$PRODUCT/firmwares/FIRMWARE_ID/release" \
-  -H "Authorization: Bearer $TOKEN"
-```
-
 ### Set Default Firmware
 
 Setting default also makes the firmware current/released.
 
 ```sh
 curl -s -X PUT "$BASE/v1/products/$PRODUCT/firmware/FIRMWARE_ID/default" \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-v2 equivalent:
-
-```sh
-curl -s -X POST "$BASE/v2/products/$PRODUCT/firmwares/FIRMWARE_ID/default" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -415,7 +357,7 @@ curl -s -X POST "$BASE/v1/devices/$DEVICE_ID/flash" \
 To flash a specific firmware record:
 
 ```sh
-curl -s -X POST "$BASE/v2/devices/$DEVICE_ID/flash" \
+curl -s -X POST "$BASE/v1/devices/$DEVICE_ID/flash" \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d "{\"product_id\":\"$PRODUCT\",\"firmware_id\":\"FIRMWARE_ID\"}"

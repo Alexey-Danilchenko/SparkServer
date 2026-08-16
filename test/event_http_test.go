@@ -41,23 +41,42 @@ func TestPublishEventRoute(t *testing.T) {
 	}
 }
 
-func TestPingRoutesEchoPayload(t *testing.T) {
+func TestPingRouteEchoesPayload(t *testing.T) {
 	handler, _ := newAuthenticatedEventHandler(t)
 
-	for _, path := range []string{"/v1/ping", "/v2/ping"} {
-		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"client":"sparkctl"}`))
-		request.Header.Set("Content-Type", "application/json")
+	request := httptest.NewRequest(http.MethodPost, "/v1/ping", strings.NewReader(`{"client":"sparkctl"}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("ping status = %d body = %s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode ping: %v", err)
+	}
+	if body["client"] != "sparkctl" || body["serverPayload"] == nil {
+		t.Fatalf("ping body = %#v", body)
+	}
+}
+
+func TestV2RoutesAreNotRegistered(t *testing.T) {
+	handler, _ := newAuthenticatedEventHandler(t)
+
+	for _, route := range []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodPost, path: "/v2/ping"},
+		{method: http.MethodGet, path: "/v2/events"},
+		{method: http.MethodGet, path: "/v2/products"},
+		{method: http.MethodGet, path: "/v2/devices/device-1/flash"},
+		{method: http.MethodGet, path: "/v2/webhooks"},
+	} {
 		response := httptest.NewRecorder()
-		handler.ServeHTTP(response, request)
-		if response.Code != http.StatusOK {
-			t.Fatalf("%s status = %d body = %s", path, response.Code, response.Body.String())
-		}
-		var body map[string]any
-		if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
-			t.Fatalf("decode %s ping: %v", path, err)
-		}
-		if body["client"] != "sparkctl" || body["serverPayload"] == nil {
-			t.Fatalf("%s ping body = %#v", path, body)
+		handler.ServeHTTP(response, httptest.NewRequest(route.method, route.path, nil))
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("%s %s status = %d", route.method, route.path, response.Code)
 		}
 	}
 }

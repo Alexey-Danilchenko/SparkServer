@@ -42,7 +42,7 @@ func TestProductRoutesCRUD(t *testing.T) {
 		t.Fatalf("product = %#v", product)
 	}
 
-	list := authedRequest(http.MethodGet, "/v2/products", "", token)
+	list := authedRequest(http.MethodGet, "/v1/products", "", token)
 	listResponse := httptest.NewRecorder()
 	handler.ServeHTTP(listResponse, list)
 	if listResponse.Code != http.StatusOK {
@@ -56,7 +56,7 @@ func TestProductRoutesCRUD(t *testing.T) {
 		t.Fatalf("products = %#v", products)
 	}
 
-	update := authedRequest(http.MethodPut, "/v2/products/brew-controller", `{"name":"Brew Controller Pro","slug":"brew-pro"}`, token)
+	update := authedRequest(http.MethodPut, "/v1/products/brew-controller", `{"name":"Brew Controller Pro","slug":"brew-pro"}`, token)
 	update.Header.Set("Content-Type", "application/json")
 	updateResponse := httptest.NewRecorder()
 	handler.ServeHTTP(updateResponse, update)
@@ -105,7 +105,7 @@ func TestProductDeviceAssociationRoutes(t *testing.T) {
 		t.Fatalf("claim status = %d body = %s", claimResponse.Code, claimResponse.Body.String())
 	}
 
-	add := authedRequest(http.MethodPost, "/v2/products/brew-controller/devices", `{"device_id":"device-1"}`, token)
+	add := authedRequest(http.MethodPost, "/v1/products/brew-controller/devices", `{"device_id":"device-1"}`, token)
 	add.Header.Set("Content-Type", "application/json")
 	addResponse := httptest.NewRecorder()
 	handler.ServeHTTP(addResponse, add)
@@ -134,7 +134,7 @@ func TestProductDeviceAssociationRoutes(t *testing.T) {
 		t.Fatalf("product devices = %#v", productDevices)
 	}
 
-	remove := authedRequest(http.MethodDelete, "/v2/products/product-1/devices/device-1", "", token)
+	remove := authedRequest(http.MethodDelete, "/v1/products/product-1/devices/device-1", "", token)
 	removeResponse := httptest.NewRecorder()
 	handler.ServeHTTP(removeResponse, remove)
 	if removeResponse.Code != http.StatusNoContent {
@@ -169,9 +169,6 @@ func TestProductCompatibilityRoutes(t *testing.T) {
 		t.Fatalf("add status = %d body = %s", addResponse.Code, addResponse.Body.String())
 	}
 
-	assertJSONNumber(t, handler, token, "/v2/products/count", 1)
-	assertJSONNumber(t, handler, token, "/v2/products/product-1/devices/count", 1)
-
 	config := authedRequest(http.MethodGet, "/v1/products/product-1/config", "", token)
 	configResponse := httptest.NewRecorder()
 	handler.ServeHTTP(configResponse, config)
@@ -201,7 +198,7 @@ func TestProductCompatibilityRoutes(t *testing.T) {
 		t.Fatalf("updated link = %#v", updatedLink)
 	}
 
-	getDevice := authedRequest(http.MethodGet, "/v2/products/product-1/devices/device-1", "", token)
+	getDevice := authedRequest(http.MethodGet, "/v1/products/product-1/devices/device-1", "", token)
 	getDeviceResponse := httptest.NewRecorder()
 	handler.ServeHTTP(getDeviceResponse, getDevice)
 	if getDeviceResponse.Code != http.StatusOK {
@@ -312,30 +309,6 @@ func newAuthenticatedProductHandlerWithEvents(
 		t.Fatalf("decode token response: %v", err)
 	}
 	return handler, body.AccessToken, eventService
-}
-
-func assertJSONNumber(
-	t        *testing.T,
-	handler  http.Handler,
-	token    string,
-	path     string,
-	expected float64,
-) {
-	t.Helper()
-
-	request := authedRequest(http.MethodGet, path, "", token)
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("%s status = %d body = %s", path, response.Code, response.Body.String())
-	}
-	var count float64
-	if err := json.NewDecoder(response.Body).Decode(&count); err != nil {
-		t.Fatalf("decode %s count: %v", path, err)
-	}
-	if count != expected {
-		t.Fatalf("%s count = %v want %v", path, count, expected)
-	}
 }
 
 func assertUnsupportedProductFeature(

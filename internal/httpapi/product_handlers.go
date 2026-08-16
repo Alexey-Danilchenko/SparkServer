@@ -1,4 +1,4 @@
-// Package httpapi contains product/fleet route handlers for v1 and v2 APIs.
+// Package httpapi contains product/fleet route handlers.
 package httpapi
 
 import (
@@ -15,14 +15,12 @@ import (
 type ProductService interface {
 	Create(ctx context.Context, request products.CreateRequest) (*domain.Product, error)
 	List(ctx context.Context, ownerID string) ([]domain.Product, error)
-	Count(ctx context.Context, ownerID string) (int, error)
 	Get(ctx context.Context, ownerID string, idOrSlug string) (*domain.Product, error)
 	Config(ctx context.Context, ownerID string, idOrSlug string) (map[string]any, error)
 	Update(ctx context.Context, ownerID string, idOrSlug string, request products.UpdateRequest) (*domain.Product, error)
 	Delete(ctx context.Context, ownerID string, idOrSlug string) error
 	AddDevice(ctx context.Context, ownerID string, productIDOrSlug string, deviceID string) (*domain.ProductDevice, error)
 	ListDevices(ctx context.Context, ownerID string, productIDOrSlug string) ([]domain.Device, error)
-	CountDevices(ctx context.Context, ownerID string, productIDOrSlug string) (int, error)
 	GetDevice(ctx context.Context, ownerID string, productIDOrSlug string, deviceID string) (*domain.Device, *domain.ProductDevice, error)
 	UpdateDevice(ctx context.Context, ownerID string, productIDOrSlug string, deviceID string, request products.ProductDeviceUpdateRequest) (*domain.ProductDevice, error)
 	RemoveDevice(ctx context.Context, ownerID string, productIDOrSlug string, deviceID string) error
@@ -46,22 +44,6 @@ func listProductsHandler(productService ProductService) http.HandlerFunc {
 			response = append(response, productResponse(&products[index]))
 		}
 		writeJSON(w, http.StatusOK, response)
-	}
-}
-
-func countProductsHandler(productService ProductService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if productService == nil {
-			writeError(w, http.StatusServiceUnavailable, "products_unavailable")
-			return
-		}
-
-		count, err := productService.Count(r.Context(), userFromContext(r.Context()).ID)
-		if err != nil {
-			writeRepositoryError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, count)
 	}
 }
 
@@ -154,22 +136,6 @@ func deleteProductHandler(productService ProductService) http.HandlerFunc {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
-	}
-}
-
-func countProductDevicesHandler(productService ProductService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if productService == nil {
-			writeError(w, http.StatusServiceUnavailable, "products_unavailable")
-			return
-		}
-
-		count, err := productService.CountDevices(r.Context(), userFromContext(r.Context()).ID, r.PathValue("productIDOrSlug"))
-		if err != nil {
-			writeRepositoryError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, count)
 	}
 }
 

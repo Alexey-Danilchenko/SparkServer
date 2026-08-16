@@ -138,14 +138,6 @@ func (service *Service) List(ctx context.Context, ownerID string) ([]domain.Prod
 	return matches, nil
 }
 
-func (service *Service) Count(ctx context.Context, ownerID string) (int, error) {
-	products, err := service.List(ctx, ownerID)
-	if err != nil {
-		return 0, err
-	}
-	return len(products), nil
-}
-
 func (service *Service) Get(
 	ctx      context.Context,
 	ownerID  string,
@@ -345,18 +337,6 @@ func (service *Service) GetDevice(
 		return device, &links[index], nil
 	}
 	return nil, nil, repository.ErrNotFound
-}
-
-func (service *Service) CountDevices(
-	ctx             context.Context,
-	ownerID         string,
-	productIDOrSlug string,
-) (int, error) {
-	devices, err := service.ListDevices(ctx, ownerID, productIDOrSlug)
-	if err != nil {
-		return 0, err
-	}
-	return len(devices), nil
 }
 
 func (service *Service) UpdateDevice(

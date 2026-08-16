@@ -16,12 +16,12 @@ This repository contains a file-backed Go implementation of the Spark/Particle l
 - Startup creation for local data directories
 - Domain models for users, tokens, devices, products, firmware, webhooks, and events
 - Repository interfaces plus clean JSON file-backed implementations
-- Product/fleet CRUD routes plus product-device association routes for v1/v2
+- Product/fleet CRUD routes plus product-device association routes
 - Webhook CRUD/update routes plus event-triggered HTTP delivery, template expansion, delivery metadata, and retry backoff
 - Default admin creation, password verification, OAuth token login, bearer token middleware, and access-token list/delete routes
 - File-backed device claim, list, get, rename, unclaim, ping, legacy signal acknowledgement, and binary/app flash update routes
 - Device claim-code creation and provisioning routes
-- In-process event broker, file-backed published event records, authenticated publish route, and v1/v2 SSE routes
+- In-process event broker, file-backed published event records, authenticated publish route, and SSE routes
 - TCP connection registry foundation and protocol-facing device online/offline state updates
 - Protocol key manager for server/device RSA PEM files and bounded binary frame read/write helpers
 - TCP handshake/session flow using framed hello payloads and RSA-decrypted session material
@@ -32,7 +32,7 @@ This repository contains a file-backed Go implementation of the Spark/Particle l
 - Device description/hello handling that persists advertised variables, functions, and attributes for REST discovery
 - Particle-style protocol aliases for variable, function, event, ping, and describe paths plus compatible function argument/query handling
 - Configurable `API_TIMEOUT` for live device variable/function/ping requests with deterministic timeout errors
-- Prebuilt firmware binary upload with file-backed metadata, SHA-256 checksums, and v1/v2 product firmware routes
+- Prebuilt firmware binary upload with file-backed metadata, SHA-256 checksums, and product firmware routes
 - Product firmware release/default selection and product firmware update-check routes
 - Product firmware auto-update checks from device describe/hello metadata, queued after the protocol ACK is sent
 - OTA flash jobs for selecting uploaded firmware for connected devices and tracking queued/running/completed/failed progress
@@ -288,14 +288,12 @@ Implemented device endpoints:
 Implemented event endpoints:
 
 - `POST /v1/ping`
-- `POST /v2/ping`
 - `GET /v1/events`
 - `GET /v1/events/{prefix}`
 - `GET /v1/devices/events`
 - `GET /v1/devices/{deviceIDOrName}/events`
 - `GET /v1/devices/{deviceIDOrName}/events/{prefix}`
 - `POST /v1/devices/events`
-- v2 equivalents for the same event routes
 
 ## Firmware Routes
 
@@ -309,24 +307,12 @@ Implemented prebuilt binary firmware metadata/storage endpoints:
 - `DELETE /v1/products/{productIDOrSlug}/firmware/{firmwareIDOrVersion}`
 - `POST|PUT /v1/products/{productIDOrSlug}/firmware/{firmwareIDOrVersion}/release`
 - `POST|PUT /v1/products/{productIDOrSlug}/firmware/{firmwareIDOrVersion}/default`
-- `GET /v2/products/{productIDOrSlug}/firmwares`
-- `POST /v2/products/{productIDOrSlug}/firmwares`
-- `GET /v2/products/{productIDOrSlug}/firmwares/count`
-- `GET /v2/products/{productIDOrSlug}/firmwares/check`
-- `GET /v2/products/{productIDOrSlug}/firmwares/{firmwareID}`
-- `PUT /v2/products/{productIDOrSlug}/firmwares/{firmwareID}`
-- `DELETE /v2/products/{productIDOrSlug}/firmwares/{firmwareID}`
-- `POST|PUT /v2/products/{productIDOrSlug}/firmwares/{firmwareID}/release`
-- `POST|PUT /v2/products/{productIDOrSlug}/firmwares/{firmwareID}/default`
-
-Brewskey documents firmware management under v1 singular `/firmware`. The v2 plural `/firmwares` list/count/get routes match Brewskey’s v2 read API; v2 create/update/delete/release/default routes are additive aliases for local operator convenience.
 
 Implemented OTA job endpoints:
 
 - `GET /v1/devices/{deviceIDOrName}/flash`
 - `POST /v1/devices/{deviceIDOrName}/flash`
 - `GET /v1/devices/{deviceIDOrName}/flash/{jobID}`
-- v2 equivalents for the same flash job routes
 
 ### Firmware Build Workflow
 
@@ -359,9 +345,6 @@ Implemented product/fleet endpoints:
 - `PUT /v1/products/{productIDOrSlug}/clients/{clientID}`
 - `DELETE /v1/products/{productIDOrSlug}/clients/{clientID}`
 - `DELETE /v1/products/{productIDOrSlug}/team/{username}`
-- `GET /v2/products/count`
-- `GET /v2/products/{productIDOrSlug}/devices/count`
-- v2 equivalents for the same product and product-device routes
 
 Product team and OAuth-client routes return `501 not_supported`, matching the original server’s unsupported status for those features.
 `PUT /v1/products/{productIDOrSlug}/devices/{deviceID}` supports Brewskey-style `desired_firmware_version` locks for targeting a specific firmware version to one product device.
@@ -375,7 +358,6 @@ Implemented webhook endpoints:
 - `GET /v1/webhooks/{webhookID}`
 - `PUT /v1/webhooks/{webhookID}`
 - `DELETE /v1/webhooks/{webhookID}`
-- v2 equivalents for the same webhook routes
 
 Published events trigger matching webhooks. Webhook `event` values can be exact names, `*`, or prefix matches ending with `*`. Delivery status, last error, failure count, and next retry time are persisted with each webhook.
 
@@ -457,5 +439,5 @@ Confirmed project direction:
 - Do not implement server-side firmware compilation; build locally with Particle Workbench/CLI or an external toolchain.
 - Treat source-compilation routes such as `/v1/binaries` as intentionally unsupported unless a future external build-service integration is explicitly designed.
 - Support OTA flashing of prebuilt `.bin` firmware binaries.
-- Preserve v1 and v2 route compatibility.
+- Preserve v1 route compatibility.
 - Defer MongoDB until after the file-backed implementation is complete and stable.

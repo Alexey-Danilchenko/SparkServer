@@ -51,14 +51,12 @@ Status values:
 | Route | Status | Notes |
 | --- | --- | --- |
 | `POST /v1/ping` | Implemented | Health-style ping route. |
-| `POST /v2/ping` | Implemented | v2 equivalent. |
 | `GET /v1/events` | Implemented | Authenticated SSE stream. |
 | `GET /v1/events/{prefix}` | Implemented | Prefix-filtered SSE stream. |
 | `GET /v1/devices/events` | Implemented | Device event stream. |
 | `GET /v1/devices/{deviceIDOrName}/events` | Implemented | Device-filtered event stream. |
 | `GET /v1/devices/{deviceIDOrName}/events/{prefix}` | Implemented | Device and prefix-filtered event stream. |
 | `POST /v1/devices/events` | Implemented | Authenticated event publish route. |
-| v2 event equivalents | Implemented | Mirrors v1 event behavior. |
 
 ## Products and Fleets
 
@@ -77,9 +75,6 @@ Status values:
 | `GET /v1/products/{productIDOrSlug}/devices/{deviceID}` | Implemented | Gets product-device association. |
 | `PUT /v1/products/{productIDOrSlug}/devices/{deviceID}` | Implemented | Updates product-device association, including Brewskey-compatible `desired_firmware_version` targeting. |
 | `DELETE /v1/products/{productIDOrSlug}/devices/{deviceID}` | Implemented | Removes product-device association. |
-| `GET /v2/products/count` | Implemented | Product count helper. |
-| `GET /v2/products/{productIDOrSlug}/devices/count` | Implemented | Product-device count helper. |
-| v2 product CRUD and device equivalents | Implemented | Mirrors v1 product behavior. |
 | Product team routes | Implemented, intentionally limited | Return `501 not_supported`, matching unsupported original local-cloud behavior. |
 | Product OAuth-client routes | Implemented, intentionally limited | Return `501 not_supported`, matching unsupported original local-cloud behavior. |
 
@@ -95,12 +90,9 @@ Status values:
 | `DELETE /v1/products/{productIDOrSlug}/firmware/{firmwareIDOrVersion}` | Implemented | Deletes metadata and binary unless an active flash job references it. |
 | `POST\|PUT /v1/products/{productIDOrSlug}/firmware/{firmwareIDOrVersion}/release` | Implemented | Marks firmware released. |
 | `POST\|PUT /v1/products/{productIDOrSlug}/firmware/{firmwareIDOrVersion}/default` | Implemented | Marks firmware default/current. |
-| v2 product firmware read routes | Implemented | Matches Brewskey plural `/firmwares` list/count/get routes. |
-| v2 product firmware management aliases | Implemented, additive | Create/update/delete/release/default mirror v1 for local operator convenience. |
 | `GET /v1/devices/{deviceIDOrName}/flash` | Implemented | Lists flash jobs for a device. |
 | `POST /v1/devices/{deviceIDOrName}/flash` | Implemented | Starts OTA for a connected device. |
 | `GET /v1/devices/{deviceIDOrName}/flash/{jobID}` | Implemented | Reads OTA job status. |
-| v2 device flash equivalents | Implemented | Mirrors v1 flash job behavior. |
 | `/v1/binaries` source compilation routes | Intentionally unsupported | Source compilation is not part of this port. |
 
 ## Webhooks
@@ -112,7 +104,6 @@ Status values:
 | `GET /v1/webhooks/{webhookID}` | Implemented | Gets webhook definition. |
 | `PUT /v1/webhooks/{webhookID}` | Implemented | Updates webhook definition. |
 | `DELETE /v1/webhooks/{webhookID}` | Implemented | Deletes webhook definition. |
-| v2 webhook equivalents | Implemented | Mirrors v1 webhook behavior. |
 | Event delivery | Implemented | Supports exact, wildcard, and prefix matching plus persisted delivery status. |
 | Advanced webhook policy tuning | Future extension | Existing retry/backoff behavior is implemented; exposing advanced operator knobs can be added later. |
 

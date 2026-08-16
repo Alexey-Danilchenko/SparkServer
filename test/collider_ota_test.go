@@ -153,7 +153,7 @@ func uploadColliderFirmware(
 ) {
 	t.Helper()
 
-	request := authedRequest(http.MethodPost, "/v2/products/"+productID+"/firmwares?filename=collider.bin&current=true", string(payload), token)
+	request := authedRequest(http.MethodPost, "/v1/products/"+productID+"/firmware?filename=collider.bin&current=true", string(payload), token)
 	request.Header.Set("Content-Type", "application/octet-stream")
 	response := httptest.NewRecorder()
 	httpHandler.ServeHTTP(response, request)

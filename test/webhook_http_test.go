@@ -58,7 +58,7 @@ func TestWebhookRoutesAndDelivery(t *testing.T) {
 		t.Fatalf("webhook = %#v", webhook)
 	}
 
-	list := authedRequest(http.MethodGet, "/v2/webhooks", "", token)
+	list := authedRequest(http.MethodGet, "/v1/webhooks", "", token)
 	listResponse := httptest.NewRecorder()
 	handler.ServeHTTP(listResponse, list)
 	if listResponse.Code != http.StatusOK {
@@ -72,7 +72,7 @@ func TestWebhookRoutesAndDelivery(t *testing.T) {
 		t.Fatalf("webhooks = %#v", webhooks)
 	}
 
-	update := authedRequest(http.MethodPut, "/v2/webhooks/"+webhook["id"].(string), `{"body":"{\"event\":\"{{event}}\",\"data\":\"{{data}}\",\"coreid\":\"{{coreid}}\"}"}`, token)
+	update := authedRequest(http.MethodPut, "/v1/webhooks/"+webhook["id"].(string), `{"body":"{\"event\":\"{{event}}\",\"data\":\"{{data}}\",\"coreid\":\"{{coreid}}\"}"}`, token)
 	update.Header.Set("Content-Type", "application/json")
 	updateResponse := httptest.NewRecorder()
 	handler.ServeHTTP(updateResponse, update)

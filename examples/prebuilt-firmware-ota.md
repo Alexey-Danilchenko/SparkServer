@@ -23,7 +23,7 @@ TOKEN=$(curl -s http://localhost:8080/oauth/token \
 This stores the binary under the product. It does not flash any device until you start an OTA job in the next step.
 
 ```sh
-curl -s -X POST 'http://localhost:8080/v2/products/demo-product/firmwares?filename=firmware.bin&version=1&current=true' \
+curl -s -X POST 'http://localhost:8080/v1/products/demo-product/firmware?filename=firmware.bin&version=1&current=true' \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/octet-stream' \
   --data-binary @./firmware.bin
