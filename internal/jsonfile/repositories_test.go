@@ -1,23 +1,26 @@
 // Package test verifies JSON file repository behavior.
-package test
+package jsonfile_test
 
 import (
-	"context"
 	"errors"
 	"testing"
 	"time"
 
-	"sparkserver/internal/domain"
-	"sparkserver/internal/repository"
-	filerepo "sparkserver/internal/repository/file"
+	"sparkserver/internal/auth"
+	devicepkg "sparkserver/internal/devices"
+	eventpkg "sparkserver/internal/events"
+	"sparkserver/internal/firmware"
+	jsonfile "sparkserver/internal/jsonfile"
+	productpkg "sparkserver/internal/products"
+	webhookpkg "sparkserver/internal/webhooks"
 )
 
 func TestFileStoreCRUD(t *testing.T) {
-	ctx := context.Background()
-	users := filerepo.NewUserRepository(t.TempDir())
+	ctx := t.Context()
+	users := jsonfile.NewUserRepository(t.TempDir())
 	now := time.Now().UTC()
 
-	user := domain.User{
+	user := auth.User{
 		ID:           "user-1",
 		Username:     "admin",
 		PasswordHash: "hash",
@@ -30,7 +33,7 @@ func TestFileStoreCRUD(t *testing.T) {
 		t.Fatalf("create user: %v", err)
 	}
 
-	if err := users.Create(ctx, &user); !errors.Is(err, repository.ErrConflict) {
+	if err := users.Create(ctx, &user); !errors.Is(err, auth.ErrConflict) {
 		t.Fatalf("create duplicate user error = %v", err)
 	}
 
@@ -67,19 +70,19 @@ func TestFileStoreCRUD(t *testing.T) {
 		t.Fatalf("delete user: %v", err)
 	}
 
-	if _, err := users.GetByID(ctx, user.ID); !errors.Is(err, repository.ErrNotFound) {
+	if _, err := users.GetByID(ctx, user.ID); !errors.Is(err, auth.ErrNotFound) {
 		t.Fatalf("get deleted user error = %v", err)
 	}
 }
 
 func TestFileRepositoryLookups(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
-	tokens := filerepo.NewAccessTokenRepository(t.TempDir())
-	if err := tokens.Create(ctx, &domain.AccessToken{Token: "token-1", UserID: "user-1"}); err != nil {
+	tokens := jsonfile.NewAccessTokenRepository(t.TempDir())
+	if err := tokens.Create(ctx, &auth.AccessToken{Token: "token-1", UserID: "user-1"}); err != nil {
 		t.Fatalf("create token 1: %v", err)
 	}
-	if err := tokens.Create(ctx, &domain.AccessToken{Token: "token-2", UserID: "user-2"}); err != nil {
+	if err := tokens.Create(ctx, &auth.AccessToken{Token: "token-2", UserID: "user-2"}); err != nil {
 		t.Fatalf("create token 2: %v", err)
 	}
 
@@ -91,8 +94,8 @@ func TestFileRepositoryLookups(t *testing.T) {
 		t.Fatalf("user tokens = %#v", userTokens)
 	}
 
-	devices := filerepo.NewDeviceRepository(t.TempDir())
-	if err := devices.Create(ctx, &domain.Device{ID: "device-1", OwnerID: "user-1", Name: "kettle"}); err != nil {
+	devices := jsonfile.NewDeviceRepository(t.TempDir())
+	if err := devices.Create(ctx, &devicepkg.Device{ID: "device-1", OwnerID: "user-1", Name: "kettle"}); err != nil {
 		t.Fatalf("create device: %v", err)
 	}
 	device, err := devices.GetByName(ctx, "user-1", "kettle")
@@ -103,8 +106,8 @@ func TestFileRepositoryLookups(t *testing.T) {
 		t.Fatalf("device id = %q", device.ID)
 	}
 
-	products := filerepo.NewProductRepository(t.TempDir())
-	if err := products.Create(ctx, &domain.Product{ID: "product-1", Slug: "brew-controller", Name: "Brew Controller"}); err != nil {
+	products := jsonfile.NewProductRepository(t.TempDir())
+	if err := products.Create(ctx, &productpkg.Product{ID: "product-1", Slug: "brew-controller", Name: "Brew Controller"}); err != nil {
 		t.Fatalf("create product: %v", err)
 	}
 	product, err := products.GetBySlug(ctx, "brew-controller")
@@ -115,8 +118,8 @@ func TestFileRepositoryLookups(t *testing.T) {
 		t.Fatalf("product id = %q", product.ID)
 	}
 
-	productDevices := filerepo.NewProductDeviceRepository(t.TempDir())
-	if err := productDevices.Create(ctx, &domain.ProductDevice{ID: "product-device-1", ProductID: "product-1", DeviceID: "device-1"}); err != nil {
+	productDevices := jsonfile.NewProductDeviceRepository(t.TempDir())
+	if err := productDevices.Create(ctx, &productpkg.ProductDevice{ID: "product-device-1", ProductID: "product-1", DeviceID: "device-1"}); err != nil {
 		t.Fatalf("create product device: %v", err)
 	}
 	devicesForProduct, err := productDevices.GetByProductID(ctx, "product-1")
@@ -127,8 +130,8 @@ func TestFileRepositoryLookups(t *testing.T) {
 		t.Fatalf("product devices = %#v", devicesForProduct)
 	}
 
-	firmwares := filerepo.NewProductFirmwareRepository(t.TempDir())
-	if err := firmwares.Create(ctx, &domain.ProductFirmware{ID: "firmware-1", ProductID: "product-1", Version: 1}); err != nil {
+	firmwares := jsonfile.NewProductFirmwareRepository(t.TempDir())
+	if err := firmwares.Create(ctx, &firmware.ProductFirmware{ID: "firmware-1", ProductID: "product-1", Version: 1}); err != nil {
 		t.Fatalf("create firmware: %v", err)
 	}
 	productFirmwares, err := firmwares.GetByProductID(ctx, "product-1")
@@ -139,8 +142,8 @@ func TestFileRepositoryLookups(t *testing.T) {
 		t.Fatalf("product firmwares = %#v", productFirmwares)
 	}
 
-	webhooks := filerepo.NewWebhookRepository(t.TempDir())
-	if err := webhooks.Create(ctx, &domain.Webhook{ID: "webhook-1", Event: "brew.started", URL: "https://example.test/hook"}); err != nil {
+	webhooks := jsonfile.NewWebhookRepository(t.TempDir())
+	if err := webhooks.Create(ctx, &webhookpkg.Webhook{ID: "webhook-1", Event: "brew.started", URL: "https://example.test/hook"}); err != nil {
 		t.Fatalf("create webhook: %v", err)
 	}
 	webhooksForEvent, err := webhooks.GetByEvent(ctx, "brew.started")
@@ -151,11 +154,11 @@ func TestFileRepositoryLookups(t *testing.T) {
 		t.Fatalf("webhooks = %#v", webhooksForEvent)
 	}
 
-	events := filerepo.NewEventRepository(t.TempDir())
-	if err := events.Create(ctx, &domain.Event{ID: "event-1", Name: "brew.started"}); err != nil {
+	events := jsonfile.NewEventRepository(t.TempDir())
+	if err := events.Create(ctx, &eventpkg.Event{ID: "event-1", Name: "brew.started"}); err != nil {
 		t.Fatalf("create event: %v", err)
 	}
-	if err := events.Create(ctx, &domain.Event{ID: "event-2", Name: "device.online"}); err != nil {
+	if err := events.Create(ctx, &eventpkg.Event{ID: "event-2", Name: "device.online"}); err != nil {
 		t.Fatalf("create event: %v", err)
 	}
 	brewEvents, err := events.GetByNamePrefix(ctx, "brew.")
@@ -168,9 +171,9 @@ func TestFileRepositoryLookups(t *testing.T) {
 }
 
 func TestFileStoreRejectsPathLikeIDs(t *testing.T) {
-	ctx := context.Background()
-	users := filerepo.NewUserRepository(t.TempDir())
-	user := domain.User{ID: "../outside", Username: "bad"}
+	ctx := t.Context()
+	users := jsonfile.NewUserRepository(t.TempDir())
+	user := auth.User{ID: "../outside", Username: "bad"}
 
 	if err := users.Create(ctx, &user); err == nil {
 		t.Fatal("expected invalid id error")

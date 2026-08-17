@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"sparkserver/internal/devices"
+	jsonfile "sparkserver/internal/jsonfile"
 	"sparkserver/internal/protocol/tcp"
-	filerepo "sparkserver/internal/repository/file"
 )
 
 func TestRegistryRegisterTouchUnregister(t *testing.T) {
@@ -46,8 +46,8 @@ func TestRegistryRegisterTouchUnregister(t *testing.T) {
 func TestTCPRegisterDeviceUpdatesDeviceState(t *testing.T) {
 	dir := t.TempDir()
 	deviceService := devices.NewService(
-		filerepo.NewDeviceRepository(filepath.Join(dir, "devices")),
-		filerepo.NewDeviceClaimRepository(filepath.Join(dir, "deviceClaims")),
+		jsonfile.NewDeviceRepository(filepath.Join(dir, "devices")),
+		jsonfile.NewDeviceClaimRepository(filepath.Join(dir, "deviceClaims")),
 	)
 
 	client, serverConn := net.Pipe()

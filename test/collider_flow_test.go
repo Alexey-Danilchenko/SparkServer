@@ -13,13 +13,13 @@ import (
 
 	"sparkserver/internal/devices"
 	"sparkserver/internal/events"
+	jsonfile "sparkserver/internal/jsonfile"
 	"sparkserver/internal/protocol/coap"
 	protocoldevice "sparkserver/internal/protocol/device"
 	"sparkserver/internal/protocol/handshake"
 	protocolkeys "sparkserver/internal/protocol/keys"
 	"sparkserver/internal/protocol/particle"
 	"sparkserver/internal/protocol/tcp"
-	filerepo "sparkserver/internal/repository/file"
 	"sparkserver/test/collider"
 )
 
@@ -34,10 +34,10 @@ func TestColliderDeviceCompletesEncryptedTCPFlow(t *testing.T) {
 	}
 
 	deviceService := devices.NewService(
-		filerepo.NewDeviceRepository(filepath.Join(dir, "devices")),
-		filerepo.NewDeviceClaimRepository(filepath.Join(dir, "deviceClaims")),
+		jsonfile.NewDeviceRepository(filepath.Join(dir, "devices")),
+		jsonfile.NewDeviceClaimRepository(filepath.Join(dir, "deviceClaims")),
+		devices.WithAPITimeout(2*time.Second),
 	)
-	deviceService.SetAPITimeout(2 * time.Second)
 	eventService := events.NewService(nil)
 	protocolHandler := protocoldevice.NewHandler(eventService, deviceService)
 	tcpServer := tcp.New("127.0.0.1:0", slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -171,12 +171,12 @@ type functionResult struct {
 }
 
 func serveColliderConnection(
-	ctx        context.Context,
-	t          *testing.T,
-	conn       net.Conn,
+	ctx context.Context,
+	t *testing.T,
+	conn net.Conn,
 	keyManager *protocolkeys.Manager,
-	tcpServer  *tcp.Server,
-	handler    *protocoldevice.Handler,
+	tcpServer *tcp.Server,
+	handler *protocoldevice.Handler,
 ) <-chan error {
 	t.Helper()
 

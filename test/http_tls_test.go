@@ -28,21 +28,15 @@ func TestHTTPServerStartsWithTLS(t *testing.T) {
 	certificatePath, privateKeyPath := writeTestCertificate(t)
 
 	var logs bytes.Buffer
-	server := httpapi.NewWithDeviceKeys(
+	server := httpapi.New(
 		":0",
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-		httpapi.TLSConfig{
+		httpapi.Dependencies{},
+		slog.New(slog.NewTextHandler(&logs, nil)).With("server", "http"),
+		httpapi.WithTLS(httpapi.TLSConfig{
 			Enabled:         true,
 			CertificateFile: certificatePath,
 			PrivateKeyFile:  privateKeyPath,
-		},
-		slog.New(slog.NewTextHandler(&logs, nil)).With("server", "http"),
+		}),
 	)
 	if err := server.Start(); err != nil {
 		t.Fatalf("start HTTPS server: %v", err)
@@ -83,17 +77,11 @@ func TestHTTPServerStartsWithTLS(t *testing.T) {
 }
 
 func TestHTTPServerRejectsMissingTLSFiles(t *testing.T) {
-	server := httpapi.NewWithDeviceKeys(
+	server := httpapi.New(
 		":0",
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-		httpapi.TLSConfig{Enabled: true},
+		httpapi.Dependencies{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		httpapi.WithTLS(httpapi.TLSConfig{Enabled: true}),
 	)
 
 	err := server.Start()

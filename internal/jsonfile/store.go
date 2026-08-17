@@ -1,5 +1,4 @@
-// Package file implements JSON-file repositories for the local Spark Server.
-package file
+package jsonfile
 
 import (
 	"context"
@@ -11,23 +10,27 @@ import (
 	"sort"
 	"strings"
 	"sync"
-
-	"sparkserver/internal/repository"
 )
 
-// Store persists one JSON document per record using the record ID as filename.
-type Store[T repository.Record] struct {
+type record interface {
+	GetID() string
+}
+
+// store persists one JSON document per record using the record ID as filename.
+// It stays private; feature-specific repositories expose the consumer contracts.
+type store[T record] struct {
 	directory string
+	notFound  error
+	conflict  error
 	mutex     sync.RWMutex
 }
 
-// NewStore creates a typed file repository rooted at directory.
-func NewStore[T repository.Record](directory string) *Store[T] {
-	return &Store[T]{directory: directory}
+func newStore[T record](directory string, notFound error, conflict error) *store[T] {
+	return &store[T]{directory: directory, notFound: notFound, conflict: conflict}
 }
 
 // Create writes a new record and fails if the ID already exists.
-func (store *Store[T]) Create(ctx context.Context, record *T) error {
+func (store *store[T]) Create(ctx context.Context, record *T) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -41,7 +44,7 @@ func (store *Store[T]) Create(ctx context.Context, record *T) error {
 	}
 
 	if _, err := os.Stat(path); err == nil {
-		return repository.ErrConflict
+		return store.conflict
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -49,7 +52,7 @@ func (store *Store[T]) Create(ctx context.Context, record *T) error {
 	return store.writeFile(path, record)
 }
 
-func (store *Store[T]) GetByID(ctx context.Context, id string) (*T, error) {
+func (store *store[T]) GetByID(ctx context.Context, id string) (*T, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -66,7 +69,7 @@ func (store *Store[T]) GetByID(ctx context.Context, id string) (*T, error) {
 }
 
 // Save atomically replaces or creates a JSON record.
-func (store *Store[T]) Save(ctx context.Context, record *T) error {
+func (store *store[T]) Save(ctx context.Context, record *T) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -82,7 +85,7 @@ func (store *Store[T]) Save(ctx context.Context, record *T) error {
 	return store.writeFile(path, record)
 }
 
-func (store *Store[T]) Delete(ctx context.Context, id string) error {
+func (store *store[T]) Delete(ctx context.Context, id string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -97,7 +100,7 @@ func (store *Store[T]) Delete(ctx context.Context, id string) error {
 
 	if err := os.Remove(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return repository.ErrNotFound
+			return store.notFound
 		}
 		return err
 	}
@@ -106,7 +109,7 @@ func (store *Store[T]) Delete(ctx context.Context, id string) error {
 }
 
 // List returns records sorted by filename for deterministic API/test behavior.
-func (store *Store[T]) List(ctx context.Context) ([]T, error) {
+func (store *store[T]) List(ctx context.Context) ([]T, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -143,7 +146,7 @@ func (store *Store[T]) List(ctx context.Context) ([]T, error) {
 	return records, nil
 }
 
-func (store *Store[T]) path(id string) (string, error) {
+func (store *store[T]) path(id string) (string, error) {
 	if err := validateID(id); err != nil {
 		return "", err
 	}
@@ -151,11 +154,11 @@ func (store *Store[T]) path(id string) (string, error) {
 	return filepath.Join(store.directory, id+".json"), nil
 }
 
-func (store *Store[T]) readFile(path string) (*T, error) {
+func (store *store[T]) readFile(path string) (*T, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, repository.ErrNotFound
+			return nil, store.notFound
 		}
 		return nil, err
 	}
@@ -168,7 +171,7 @@ func (store *Store[T]) readFile(path string) (*T, error) {
 	return &record, nil
 }
 
-func (store *Store[T]) writeFile(path string, record *T) error {
+func (store *store[T]) writeFile(path string, record *T) error {
 	if err := os.MkdirAll(store.directory, 0o755); err != nil {
 		return err
 	}

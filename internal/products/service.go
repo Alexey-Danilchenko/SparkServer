@@ -10,8 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"sparkserver/internal/domain"
-	"sparkserver/internal/repository"
+	"sparkserver/internal/devices"
 )
 
 // CreateRequest is the service-level payload for creating a product/fleet.
@@ -41,41 +40,48 @@ type ProductDeviceUpdateRequest struct {
 
 // Service coordinates products with device membership records.
 type Service struct {
-	products       repository.ProductRepository
-	productDevices repository.ProductDeviceRepository
-	firmwares      repository.ProductFirmwareRepository
-	devices        repository.DeviceRepository
+	products       Store
+	productDevices DeviceStore
+	firmwares      FirmwareCatalog
+	devices        ClaimedDeviceStore
 	clock          func() time.Time
+}
+
+type Option func(*Service)
+
+// WithFirmwareCatalog enables validation of desired product firmware versions.
+func WithFirmwareCatalog(catalog FirmwareCatalog) Option {
+	return func(service *Service) {
+		service.firmwares = catalog
+	}
 }
 
 // NewService binds product operations to product and device repositories.
 func NewService(
-	products       repository.ProductRepository,
-	productDevices repository.ProductDeviceRepository,
-	devices        repository.DeviceRepository,
+	products Store,
+	productDevices DeviceStore,
+	devices ClaimedDeviceStore,
+	options ...Option,
 ) *Service {
-	return &Service{
+	service := &Service{
 		products:       products,
 		productDevices: productDevices,
 		devices:        devices,
 		clock:          time.Now,
 	}
-}
-
-// SetProductFirmwareRepository lets product-device updates validate desired versions.
-func (service *Service) SetProductFirmwareRepository(
-	firmwares repository.ProductFirmwareRepository,
-) {
-	service.firmwares = firmwares
+	for _, option := range options {
+		option(service)
+	}
+	return service
 }
 
 // Create validates owner/slug uniqueness and stores a new product.
 func (service *Service) Create(
-	ctx     context.Context,
+	ctx context.Context,
 	request CreateRequest,
-) (*domain.Product, error) {
+) (*Product, error) {
 	if request.OwnerID == "" {
-		return nil, repository.ErrNotFound
+		return nil, ErrNotFound
 	}
 
 	slug := cleanSlug(request.Slug)
@@ -83,7 +89,7 @@ func (service *Service) Create(
 		slug = cleanSlug(request.Name)
 	}
 	if slug == "" {
-		return nil, repository.ErrNotFound
+		return nil, ErrNotFound
 	}
 
 	id := request.ID
@@ -92,18 +98,18 @@ func (service *Service) Create(
 	}
 
 	if _, err := service.products.GetByID(ctx, id); err == nil {
-		return nil, repository.ErrConflict
-	} else if !errors.Is(err, repository.ErrNotFound) {
+		return nil, ErrConflict
+	} else if !errors.Is(err, ErrNotFound) {
 		return nil, err
 	}
 	if _, err := service.products.GetBySlug(ctx, slug); err == nil {
-		return nil, repository.ErrConflict
-	} else if !errors.Is(err, repository.ErrNotFound) {
+		return nil, ErrConflict
+	} else if !errors.Is(err, ErrNotFound) {
 		return nil, err
 	}
 
 	now := service.clock().UTC()
-	product := &domain.Product{
+	product := &Product{
 		ID:          id,
 		Slug:        slug,
 		Name:        firstNonEmpty(request.Name, slug),
@@ -119,13 +125,13 @@ func (service *Service) Create(
 	return product, nil
 }
 
-func (service *Service) List(ctx context.Context, ownerID string) ([]domain.Product, error) {
+func (service *Service) List(ctx context.Context, ownerID string) ([]Product, error) {
 	products, err := service.products.List(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	matches := make([]domain.Product, 0)
+	matches := make([]Product, 0)
 	for _, product := range products {
 		if product.OwnerID == ownerID {
 			matches = append(matches, product)
@@ -139,24 +145,24 @@ func (service *Service) List(ctx context.Context, ownerID string) ([]domain.Prod
 }
 
 func (service *Service) Get(
-	ctx      context.Context,
-	ownerID  string,
+	ctx context.Context,
+	ownerID string,
 	idOrSlug string,
-) (*domain.Product, error) {
+) (*Product, error) {
 	product, err := service.productByIDOrSlug(ctx, idOrSlug)
 	if err != nil {
 		return nil, err
 	}
 	if product.OwnerID != ownerID {
-		return nil, repository.ErrNotFound
+		return nil, ErrNotFound
 	}
 	return product, nil
 }
 
 // Config returns the minimal product config shape expected by clients.
 func (service *Service) Config(
-	ctx      context.Context,
-	ownerID  string,
+	ctx context.Context,
+	ownerID string,
 	idOrSlug string,
 ) (map[string]any, error) {
 	product, err := service.Get(ctx, ownerID, idOrSlug)
@@ -173,11 +179,11 @@ func (service *Service) Config(
 }
 
 func (service *Service) Update(
-	ctx      context.Context,
-	ownerID  string,
+	ctx context.Context,
+	ownerID string,
 	idOrSlug string,
-	request  UpdateRequest,
-) (*domain.Product, error) {
+	request UpdateRequest,
+) (*Product, error) {
 	product, err := service.Get(ctx, ownerID, idOrSlug)
 	if err != nil {
 		return nil, err
@@ -187,9 +193,9 @@ func (service *Service) Update(
 		slug := cleanSlug(request.Slug)
 		existing, err := service.products.GetBySlug(ctx, slug)
 		if err == nil && existing.ID != product.ID {
-			return nil, repository.ErrConflict
+			return nil, ErrConflict
 		}
-		if err != nil && !errors.Is(err, repository.ErrNotFound) {
+		if err != nil && !errors.Is(err, ErrNotFound) {
 			return nil, err
 		}
 		product.Slug = slug
@@ -221,13 +227,13 @@ func (service *Service) Delete(ctx context.Context, ownerID string, idOrSlug str
 }
 
 func (service *Service) AddDevice(
-	ctx             context.Context,
-	ownerID         string,
+	ctx context.Context,
+	ownerID string,
 	productIDOrSlug string,
-	deviceID        string,
-) (*domain.ProductDevice, error) {
+	deviceID string,
+) (*ProductDevice, error) {
 	if deviceID == "" {
-		return nil, repository.ErrNotFound
+		return nil, ErrNotFound
 	}
 
 	product, err := service.Get(ctx, ownerID, productIDOrSlug)
@@ -239,7 +245,7 @@ func (service *Service) AddDevice(
 		return nil, err
 	}
 	if device.OwnerID != ownerID {
-		return nil, repository.ErrNotFound
+		return nil, ErrNotFound
 	}
 
 	links, err := service.productDevices.GetByProductID(ctx, product.ID)
@@ -253,7 +259,7 @@ func (service *Service) AddDevice(
 	}
 
 	now := service.clock().UTC()
-	link := &domain.ProductDevice{
+	link := &ProductDevice{
 		ID:        newProductID(),
 		ProductID: product.ID,
 		DeviceID:  deviceID,
@@ -275,10 +281,10 @@ func (service *Service) AddDevice(
 }
 
 func (service *Service) ListDevices(
-	ctx             context.Context,
-	ownerID         string,
+	ctx context.Context,
+	ownerID string,
 	productIDOrSlug string,
-) ([]domain.Device, error) {
+) ([]devices.Device, error) {
 	product, err := service.Get(ctx, ownerID, productIDOrSlug)
 	if err != nil {
 		return nil, err
@@ -288,32 +294,32 @@ func (service *Service) ListDevices(
 		return nil, err
 	}
 
-	devices := make([]domain.Device, 0, len(links))
+	claimedDevices := make([]devices.Device, 0, len(links))
 	for _, link := range links {
 		device, err := service.devices.GetByID(ctx, link.DeviceID)
 		if err != nil {
-			if errors.Is(err, repository.ErrNotFound) {
+			if errors.Is(err, devices.ErrNotFound) {
 				continue
 			}
 			return nil, err
 		}
 		if device.OwnerID == ownerID {
-			devices = append(devices, *device)
+			claimedDevices = append(claimedDevices, *device)
 		}
 	}
 
-	sort.Slice(devices, func(left int, right int) bool {
-		return devices[left].CreatedAt.Before(devices[right].CreatedAt)
+	sort.Slice(claimedDevices, func(left int, right int) bool {
+		return claimedDevices[left].CreatedAt.Before(claimedDevices[right].CreatedAt)
 	})
-	return devices, nil
+	return claimedDevices, nil
 }
 
 func (service *Service) GetDevice(
-	ctx             context.Context,
-	ownerID         string,
+	ctx context.Context,
+	ownerID string,
 	productIDOrSlug string,
-	deviceID        string,
-) (*domain.Device, *domain.ProductDevice, error) {
+	deviceID string,
+) (*devices.Device, *ProductDevice, error) {
 	product, err := service.Get(ctx, ownerID, productIDOrSlug)
 	if err != nil {
 		return nil, nil, err
@@ -332,20 +338,20 @@ func (service *Service) GetDevice(
 			return nil, nil, err
 		}
 		if device.OwnerID != ownerID {
-			return nil, nil, repository.ErrNotFound
+			return nil, nil, ErrNotFound
 		}
 		return device, &links[index], nil
 	}
-	return nil, nil, repository.ErrNotFound
+	return nil, nil, ErrNotFound
 }
 
 func (service *Service) UpdateDevice(
-	ctx             context.Context,
-	ownerID         string,
+	ctx context.Context,
+	ownerID string,
 	productIDOrSlug string,
-	deviceID        string,
-	request         ProductDeviceUpdateRequest,
-) (*domain.ProductDevice, error) {
+	deviceID string,
+	request ProductDeviceUpdateRequest,
+) (*ProductDevice, error) {
 	_, link, err := service.GetDevice(ctx, ownerID, productIDOrSlug, deviceID)
 	if err != nil {
 		return nil, err
@@ -380,10 +386,10 @@ func (service *Service) UpdateDevice(
 }
 
 func (service *Service) RemoveDevice(
-	ctx             context.Context,
-	ownerID         string,
+	ctx context.Context,
+	ownerID string,
 	productIDOrSlug string,
-	deviceID        string,
+	deviceID string,
 ) error {
 	product, err := service.Get(ctx, ownerID, productIDOrSlug)
 	if err != nil {
@@ -407,40 +413,38 @@ func (service *Service) RemoveDevice(
 		}
 		return nil
 	}
-	return repository.ErrNotFound
+	return ErrNotFound
 }
 
 func (service *Service) validateFirmwareVersion(
-	ctx       context.Context,
+	ctx context.Context,
 	productID string,
-	version   int,
+	version int,
 ) error {
 	if service.firmwares == nil {
 		return nil
 	}
 
-	firmwares, err := service.firmwares.GetByProductID(ctx, productID)
+	found, err := service.firmwares.HasProductFirmwareVersion(ctx, productID, version)
 	if err != nil {
 		return err
 	}
-	for index := range firmwares {
-		if firmwares[index].Version == version {
-			return nil
-		}
+	if !found {
+		return ErrNotFound
 	}
-	return repository.ErrNotFound
+	return nil
 }
 
 func (service *Service) productByIDOrSlug(
-	ctx      context.Context,
+	ctx context.Context,
 	idOrSlug string,
-) (*domain.Product, error) {
+) (*Product, error) {
 	if idOrSlug == "" {
-		return nil, repository.ErrNotFound
+		return nil, ErrNotFound
 	}
 	if product, err := service.products.GetByID(ctx, idOrSlug); err == nil {
 		return product, nil
-	} else if !errors.Is(err, repository.ErrNotFound) {
+	} else if !errors.Is(err, ErrNotFound) {
 		return nil, err
 	}
 	return service.products.GetBySlug(ctx, idOrSlug)

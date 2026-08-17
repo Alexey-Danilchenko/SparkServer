@@ -8,9 +8,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"sparkserver/internal/domain"
-	"sparkserver/internal/repository"
 )
 
 // Filter limits event streams by name prefix, device, or product.
@@ -22,12 +19,12 @@ type Filter struct {
 
 // Sink receives published events; webhooks implement this interface.
 type Sink interface {
-	DeliverEvent(ctx context.Context, event domain.Event) error
+	DeliverEvent(ctx context.Context, event Event) error
 }
 
 // Service stores events and fans them out to subscribers and sinks.
 type Service struct {
-	events      repository.EventRepository
+	events      Store
 	mutex       sync.RWMutex
 	nextID      int
 	subscribers map[int]subscription
@@ -37,11 +34,11 @@ type Service struct {
 
 type subscription struct {
 	filter Filter
-	events chan domain.Event
+	events chan Event
 }
 
-// NewService creates an event broker backed by an optional repository.
-func NewService(events repository.EventRepository) *Service {
+// NewService creates an event broker backed by an optional event store.
+func NewService(events Store) *Service {
 	return &Service{
 		events:      events,
 		subscribers: make(map[int]subscription),
@@ -50,11 +47,11 @@ func NewService(events repository.EventRepository) *Service {
 }
 
 // Subscribe returns a buffered stream closed when the caller's context ends.
-func (service *Service) Subscribe(ctx context.Context, filter Filter) <-chan domain.Event {
+func (service *Service) Subscribe(ctx context.Context, filter Filter) <-chan Event {
 	service.mutex.Lock()
 	id := service.nextID
 	service.nextID++
-	events := make(chan domain.Event, 16)
+	events := make(chan Event, 16)
 	service.subscribers[id] = subscription{filter: filter, events: events}
 	service.mutex.Unlock()
 
@@ -81,7 +78,7 @@ func (service *Service) AddSink(sink Sink) {
 }
 
 // Publish assigns metadata, persists the event, and broadcasts it to listeners.
-func (service *Service) Publish(ctx context.Context, event *domain.Event) (*domain.Event, error) {
+func (service *Service) Publish(ctx context.Context, event *Event) (*Event, error) {
 	if event.ID == "" {
 		event.ID = newEventID()
 	}
@@ -100,7 +97,7 @@ func (service *Service) Publish(ctx context.Context, event *domain.Event) (*doma
 	return event, nil
 }
 
-func (service *Service) publishToSubscribers(event domain.Event) {
+func (service *Service) publishToSubscribers(event Event) {
 	service.mutex.RLock()
 	defer service.mutex.RUnlock()
 
@@ -116,7 +113,7 @@ func (service *Service) publishToSubscribers(event domain.Event) {
 	}
 }
 
-func (service *Service) deliverToSinks(ctx context.Context, event domain.Event) {
+func (service *Service) deliverToSinks(ctx context.Context, event Event) {
 	service.mutex.RLock()
 	sinks := append([]Sink(nil), service.sinks...)
 	service.mutex.RUnlock()
@@ -126,7 +123,7 @@ func (service *Service) deliverToSinks(ctx context.Context, event domain.Event) 
 	}
 }
 
-func matches(filter Filter, event domain.Event) bool {
+func matches(filter Filter, event Event) bool {
 	if filter.Prefix != "" && !strings.HasPrefix(event.Name, filter.Prefix) {
 		return false
 	}

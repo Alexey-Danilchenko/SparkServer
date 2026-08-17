@@ -22,7 +22,7 @@ func main() {
 	cfg, err := config.Load("settings.json")
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
-			logger.Error("load config", "error", err)
+			logger.Error("load config", "err", err)
 			os.Exit(1)
 		}
 
@@ -31,23 +31,26 @@ func main() {
 	}
 
 	server := app.New(cfg, logger)
+	runContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	// Start wires both public surfaces: the HTTP API for clients and the TCP
 	// listener used by Particle devices.
-	if err := server.Start(context.Background()); err != nil {
-		logger.Error("start server", "error", err)
+	if err := server.Start(runContext); err != nil {
+		logger.Error("start server", "err", err)
 		os.Exit(1)
 	}
 
-	// Block here until we terminate the server with below signals
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	<-stop
+	runtimeError := server.Wait(runContext)
+	if errors.Is(runtimeError, context.Canceled) {
+		runtimeError = nil
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if err := server.Shutdown(ctx); err != nil {
-		logger.Error("shutdown server", "error", err)
+	if err := errors.Join(runtimeError, server.Shutdown(ctx)); err != nil {
+		logger.Error("server stopped", "err", err)
 		os.Exit(1)
 	}
 }

@@ -14,8 +14,8 @@ This repository contains a file-backed Go implementation of the Spark/Particle l
 - TCP device listener on port `5683`
 - Graceful shutdown on interrupt or `SIGTERM`
 - Startup creation for local data directories
-- Domain models for users, tokens, devices, products, firmware, webhooks, and events
-- Repository interfaces plus clean JSON file-backed implementations
+- Feature-owned models and storage contracts for users, tokens, devices, products, firmware, webhooks, and events
+- Private generic JSON storage with feature-specific file-backed adapters
 - Product/fleet CRUD routes plus product-device association routes
 - Webhook CRUD/update routes plus event-triggered HTTP delivery, template expansion, delivery metadata, and retry backoff
 - Default admin creation, password verification, OAuth token login, bearer token middleware, and access-token list/delete routes
@@ -66,20 +66,19 @@ MongoDB storage is deferred as a future extension after the file-backed server p
 │   ├── auth
 │   ├── config
 │   ├── devices
-│   ├── domain
 │   ├── events
 │   ├── firmware
 │   ├── httpapi
+│   ├── jsonfile
 │   ├── monitorcli
 │   ├── products
 │   ├── protocol
-│   ├── repository
 │   └── webhooks
 └── test
-    └── collider
+    └── collider and end-to-end tests
 ```
 
-Go source files now live at the project root under `cmd/`, `internal/`, and related package directories. Tests live under `test/`.
+Go source files live under `cmd/` and `internal/`. Focused unit tests live beside their packages; collider and end-to-end tests remain under `test/`.
 
 Runtime data is separate from source code. The server creates and uses `data/` at runtime for local file storage, and `data/` is ignored by git.
 

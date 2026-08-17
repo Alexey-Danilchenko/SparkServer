@@ -14,10 +14,9 @@ import (
 	"time"
 
 	"sparkserver/internal/auth"
-	"sparkserver/internal/domain"
 	"sparkserver/internal/events"
 	"sparkserver/internal/httpapi"
-	filerepo "sparkserver/internal/repository/file"
+	jsonfile "sparkserver/internal/jsonfile"
 )
 
 func TestPublishEventRoute(t *testing.T) {
@@ -88,15 +87,14 @@ func TestSSEReceivesPublishedEvents(t *testing.T) {
 
 	streamRequest := httptest.NewRequest(http.MethodGet, "/v1/events/brew.", nil).WithContext(ctx)
 	streamRequest.Header.Set("Authorization", "Bearer "+token)
-	streamResponse := httptest.NewRecorder()
+	streamResponse := newSSERecorder()
 	done := make(chan struct{})
 
 	go func() {
 		handler.ServeHTTP(streamResponse, streamRequest)
 		close(done)
 	}()
-
-	time.Sleep(25 * time.Millisecond)
+	streamResponse.waitForFlush(t)
 
 	publishRequest := authedRequest(http.MethodPost, "/v1/devices/events", `{"name":"brew.started","data":"hot"}`, token)
 	publishRequest.Header.Set("Content-Type", "application/json")
@@ -107,18 +105,9 @@ func TestSSEReceivesPublishedEvents(t *testing.T) {
 		t.Fatalf("publish status = %d body = %s", publishResponse.Code, publishResponse.Body.String())
 	}
 
-	deadline := time.After(2 * time.Second)
-	for {
-		if strings.Contains(streamResponse.Body.String(), "event: brew.started") {
-			break
-		}
-
-		select {
-		case <-deadline:
-			t.Fatalf("timed out waiting for SSE event, body = %s", streamResponse.Body.String())
-		default:
-			time.Sleep(10 * time.Millisecond)
-		}
+	streamResponse.waitForFlush(t)
+	if body := streamResponse.BodyString(); !strings.Contains(body, "event: brew.started") {
+		t.Fatalf("SSE body = %s", body)
 	}
 
 	cancel()
@@ -157,17 +146,17 @@ func newAuthenticatedEventHandler(t *testing.T) (http.Handler, string) {
 
 	dir := t.TempDir()
 	authService := auth.NewService(
-		filerepo.NewUserRepository(filepath.Join(dir, "users")),
-		filerepo.NewAccessTokenRepository(filepath.Join(dir, "tokens")),
+		jsonfile.NewUserRepository(filepath.Join(dir, "users")),
+		jsonfile.NewAccessTokenRepository(filepath.Join(dir, "tokens")),
 		24*time.Hour,
 	)
-	eventService := events.NewService(filerepo.NewEventRepository(filepath.Join(dir, "events")))
+	eventService := events.NewService(jsonfile.NewEventRepository(filepath.Join(dir, "events")))
 
 	if err := authService.EnsureDefaultAdmin(context.Background(), "__admin__", "adminPassword"); err != nil {
 		t.Fatalf("ensure default admin: %v", err)
 	}
 
-	handler := httpapi.NewHandler(authService, nil, eventService, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	handler := httpapi.NewHandler(httpapi.Dependencies{Auth: authService, Events: eventService}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	response := postForm(t, handler, "/oauth/token", "grant_type=password&username=__admin__&password=adminPassword")
 	if response.Code != http.StatusOK {
 		t.Fatalf("token status = %d body = %s", response.Code, response.Body.String())
@@ -183,6 +172,6 @@ func newAuthenticatedEventHandler(t *testing.T) (http.Handler, string) {
 	return handler, body.AccessToken
 }
 
-func eventFromTest(name string) *domain.Event {
-	return &domain.Event{Name: name}
+func eventFromTest(name string) *events.Event {
+	return &events.Event{Name: name}
 }

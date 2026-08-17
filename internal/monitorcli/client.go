@@ -68,10 +68,10 @@ type Event struct {
 
 // NewClient validates the base URL and prepares authentication for later requests.
 func NewClient(
-	baseURL    string,
-	token      string,
-	username   string,
-	password   string,
+	baseURL string,
+	token string,
+	username string,
+	password string,
 	httpClient *http.Client,
 ) (*Client, error) {
 	baseURL = strings.TrimSpace(baseURL)
@@ -145,8 +145,8 @@ func (client *Client) Ping(ctx context.Context, deviceID string) (*PingResult, e
 }
 
 func (client *Client) GetVariable(
-	ctx          context.Context,
-	deviceID     string,
+	ctx context.Context,
+	deviceID string,
 	variableName string,
 ) (*VariableResult, error) {
 	var result VariableResult
@@ -155,10 +155,10 @@ func (client *Client) GetVariable(
 }
 
 func (client *Client) CallFunction(
-	ctx          context.Context,
-	deviceID     string,
+	ctx context.Context,
+	deviceID string,
 	functionName string,
-	argument     string,
+	argument string,
 ) (*FunctionResult, error) {
 	form := url.Values{}
 	form.Set("arg", argument)
@@ -173,10 +173,10 @@ func (client *Client) CallFunction(
 }
 
 func (client *Client) StreamEvents(
-	ctx      context.Context,
+	ctx context.Context,
 	deviceID string,
-	prefix   string,
-	handle   func(Event) error,
+	prefix string,
+	handle func(Event) error,
 ) error {
 	if err := client.ensureToken(ctx); err != nil {
 		return err
@@ -230,10 +230,10 @@ func (client *Client) doJSON(request *http.Request, target any) error {
 }
 
 func (client *Client) newRequest(
-	ctx    context.Context,
+	ctx context.Context,
 	method string,
-	path   string,
-	body   io.Reader,
+	path string,
+	body io.Reader,
 ) (*http.Request, error) {
 	request, err := http.NewRequestWithContext(ctx, method, client.baseURL+path, body)
 	if err != nil {

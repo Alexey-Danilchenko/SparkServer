@@ -1,9 +1,8 @@
 // Package test verifies sparkctl command behavior.
-package test
+package monitorcli_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -19,7 +18,7 @@ func TestMonitorCLIListsDevicesWithAutomaticLogin(t *testing.T) {
 	defer server.Close()
 
 	var out bytes.Buffer
-	err := monitorcli.Run(context.Background(), []string{
+	err := monitorcli.Run(t.Context(), []string{
 		"-base", server.URL,
 		"-username", "__admin__",
 		"-password", "adminPassword",
@@ -40,7 +39,7 @@ func TestMonitorCLIReadsVariableAndCallsFunction(t *testing.T) {
 	defer server.Close()
 
 	var variableOut bytes.Buffer
-	if err := monitorcli.Run(context.Background(), []string{
+	if err := monitorcli.Run(t.Context(), []string{
 		"-base", server.URL,
 		"-token", "token-123",
 		"variable", "device-1", "temperature",
@@ -52,7 +51,7 @@ func TestMonitorCLIReadsVariableAndCallsFunction(t *testing.T) {
 	}
 
 	var functionOut bytes.Buffer
-	if err := monitorcli.Run(context.Background(), []string{
+	if err := monitorcli.Run(t.Context(), []string{
 		"-base", server.URL,
 		"-token", "token-123",
 		"function", "device-1", "brew", "start",
@@ -69,7 +68,7 @@ func TestMonitorCLIStreamsEventsAsJSON(t *testing.T) {
 	defer server.Close()
 
 	var out bytes.Buffer
-	err := monitorcli.Run(context.Background(), []string{
+	err := monitorcli.Run(t.Context(), []string{
 		"-base", server.URL,
 		"-token", "token-123",
 		"-json",

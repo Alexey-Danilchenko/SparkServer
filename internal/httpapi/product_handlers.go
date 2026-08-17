@@ -7,22 +7,47 @@ import (
 	"net/http"
 	"strings"
 
-	"sparkserver/internal/domain"
+	"sparkserver/internal/auth"
+	"sparkserver/internal/devices"
 	"sparkserver/internal/products"
 )
 
+func registerProductRoutes(
+	router *http.ServeMux,
+	authService *auth.Service,
+	productService ProductService,
+	firmwareService FirmwareService,
+) {
+	router.Handle("GET /v1/products", requireAuth(authService, http.HandlerFunc(listProductsHandler(productService))))
+	router.Handle("POST /v1/products", requireAuth(authService, http.HandlerFunc(createProductHandler(productService))))
+	router.Handle("GET /v1/products/{productIDOrSlug}/config", requireAuth(authService, http.HandlerFunc(getProductConfigHandler(productService))))
+	router.Handle("DELETE /v1/products/{productIDOrSlug}/team/{username}", requireAuth(authService, http.HandlerFunc(unsupportedProductFeatureHandler("not_supported"))))
+	router.Handle("POST /v1/products/{productIDOrSlug}/clients", requireAuth(authService, http.HandlerFunc(unsupportedProductFeatureHandler("not_supported"))))
+	router.Handle("POST /v1/products/{productIDOrSlug}/clients/", requireAuth(authService, http.HandlerFunc(unsupportedProductFeatureHandler("not_supported"))))
+	router.Handle("PUT /v1/products/{productIDOrSlug}/clients/{clientID}", requireAuth(authService, http.HandlerFunc(unsupportedProductFeatureHandler("not_supported"))))
+	router.Handle("DELETE /v1/products/{productIDOrSlug}/clients/{clientID}", requireAuth(authService, http.HandlerFunc(unsupportedProductFeatureHandler("not_supported"))))
+	router.Handle("GET /v1/products/{productIDOrSlug}", requireAuth(authService, http.HandlerFunc(getProductHandler(productService))))
+	router.Handle("PUT /v1/products/{productIDOrSlug}", requireAuth(authService, http.HandlerFunc(updateProductHandler(productService))))
+	router.Handle("DELETE /v1/products/{productIDOrSlug}", requireAuth(authService, http.HandlerFunc(deleteProductHandler(productService))))
+	router.Handle("GET /v1/products/{productIDOrSlug}/devices", requireAuth(authService, http.HandlerFunc(listProductDevicesHandler(productService))))
+	router.Handle("POST /v1/products/{productIDOrSlug}/devices", requireAuth(authService, http.HandlerFunc(addProductDeviceHandler(productService))))
+	router.Handle("GET /v1/products/{productIDOrSlug}/devices/{deviceID}", requireAuth(authService, http.HandlerFunc(getProductDeviceHandler(productService))))
+	router.Handle("PUT /v1/products/{productIDOrSlug}/devices/{deviceID}", requireAuth(authService, http.HandlerFunc(updateProductDeviceHandler(productService, firmwareService))))
+	router.Handle("DELETE /v1/products/{productIDOrSlug}/devices/{deviceID}", requireAuth(authService, http.HandlerFunc(removeProductDeviceHandler(productService))))
+}
+
 // ProductService is the HTTP-facing subset implemented by products.Service.
 type ProductService interface {
-	Create(ctx context.Context, request products.CreateRequest) (*domain.Product, error)
-	List(ctx context.Context, ownerID string) ([]domain.Product, error)
-	Get(ctx context.Context, ownerID string, idOrSlug string) (*domain.Product, error)
+	Create(ctx context.Context, request products.CreateRequest) (*products.Product, error)
+	List(ctx context.Context, ownerID string) ([]products.Product, error)
+	Get(ctx context.Context, ownerID string, idOrSlug string) (*products.Product, error)
 	Config(ctx context.Context, ownerID string, idOrSlug string) (map[string]any, error)
-	Update(ctx context.Context, ownerID string, idOrSlug string, request products.UpdateRequest) (*domain.Product, error)
+	Update(ctx context.Context, ownerID string, idOrSlug string, request products.UpdateRequest) (*products.Product, error)
 	Delete(ctx context.Context, ownerID string, idOrSlug string) error
-	AddDevice(ctx context.Context, ownerID string, productIDOrSlug string, deviceID string) (*domain.ProductDevice, error)
-	ListDevices(ctx context.Context, ownerID string, productIDOrSlug string) ([]domain.Device, error)
-	GetDevice(ctx context.Context, ownerID string, productIDOrSlug string, deviceID string) (*domain.Device, *domain.ProductDevice, error)
-	UpdateDevice(ctx context.Context, ownerID string, productIDOrSlug string, deviceID string, request products.ProductDeviceUpdateRequest) (*domain.ProductDevice, error)
+	AddDevice(ctx context.Context, ownerID string, productIDOrSlug string, deviceID string) (*products.ProductDevice, error)
+	ListDevices(ctx context.Context, ownerID string, productIDOrSlug string) ([]devices.Device, error)
+	GetDevice(ctx context.Context, ownerID string, productIDOrSlug string, deviceID string) (*devices.Device, *products.ProductDevice, error)
+	UpdateDevice(ctx context.Context, ownerID string, productIDOrSlug string, deviceID string, request products.ProductDeviceUpdateRequest) (*products.ProductDevice, error)
 	RemoveDevice(ctx context.Context, ownerID string, productIDOrSlug string, deviceID string) error
 }
 
@@ -35,7 +60,7 @@ func listProductsHandler(productService ProductService) http.HandlerFunc {
 
 		products, err := productService.List(r.Context(), userFromContext(r.Context()).ID)
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 
@@ -63,7 +88,7 @@ func createProductHandler(productService ProductService) http.HandlerFunc {
 
 		product, err := productService.Create(r.Context(), request)
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusCreated, productResponse(product))
@@ -79,7 +104,7 @@ func getProductHandler(productService ProductService) http.HandlerFunc {
 
 		product, err := productService.Get(r.Context(), userFromContext(r.Context()).ID, r.PathValue("productIDOrSlug"))
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, productResponse(product))
@@ -95,7 +120,7 @@ func getProductConfigHandler(productService ProductService) http.HandlerFunc {
 
 		config, err := productService.Config(r.Context(), userFromContext(r.Context()).ID, r.PathValue("productIDOrSlug"))
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"product_configuration": config})
@@ -117,7 +142,7 @@ func updateProductHandler(productService ProductService) http.HandlerFunc {
 
 		product, err := productService.Update(r.Context(), userFromContext(r.Context()).ID, r.PathValue("productIDOrSlug"), request)
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, productResponse(product))
@@ -132,7 +157,7 @@ func deleteProductHandler(productService ProductService) http.HandlerFunc {
 		}
 
 		if err := productService.Delete(r.Context(), userFromContext(r.Context()).ID, r.PathValue("productIDOrSlug")); err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -148,7 +173,7 @@ func listProductDevicesHandler(productService ProductService) http.HandlerFunc {
 
 		devices, err := productService.ListDevices(r.Context(), userFromContext(r.Context()).ID, r.PathValue("productIDOrSlug"))
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 
@@ -169,7 +194,7 @@ func getProductDeviceHandler(productService ProductService) http.HandlerFunc {
 
 		device, link, err := productService.GetDevice(r.Context(), userFromContext(r.Context()).ID, r.PathValue("productIDOrSlug"), r.PathValue("deviceID"))
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, productDeviceDetailResponse(device, link))
@@ -191,7 +216,7 @@ func addProductDeviceHandler(productService ProductService) http.HandlerFunc {
 
 		link, err := productService.AddDevice(r.Context(), userFromContext(r.Context()).ID, r.PathValue("productIDOrSlug"), deviceID)
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusCreated, productDeviceResponse(link))
@@ -199,7 +224,7 @@ func addProductDeviceHandler(productService ProductService) http.HandlerFunc {
 }
 
 func updateProductDeviceHandler(
-	productService  ProductService,
+	productService ProductService,
 	firmwareService FirmwareService,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -216,7 +241,7 @@ func updateProductDeviceHandler(
 
 		link, err := productService.UpdateDevice(r.Context(), userFromContext(r.Context()).ID, r.PathValue("productIDOrSlug"), r.PathValue("deviceID"), request)
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 		if firmwareService != nil && shouldTriggerProductFirmwareUpdate(request) {
@@ -241,7 +266,7 @@ func removeProductDeviceHandler(productService ProductService) http.HandlerFunc 
 		}
 
 		if err := productService.RemoveDevice(r.Context(), userFromContext(r.Context()).ID, r.PathValue("productIDOrSlug"), r.PathValue("deviceID")); err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -379,7 +404,7 @@ func productDeviceUpdateFromHTTP(r *http.Request) (products.ProductDeviceUpdateR
 	return request, request.Notes != nil || request.Denied != nil || request.Development != nil || request.Quarantined != nil || request.DesiredFirmwareVersion != nil
 }
 
-func productResponse(product *domain.Product) map[string]any {
+func productResponse(product *products.Product) map[string]any {
 	return map[string]any{
 		"id":          product.ID,
 		"slug":        product.Slug,
@@ -391,7 +416,7 @@ func productResponse(product *domain.Product) map[string]any {
 	}
 }
 
-func productDeviceResponse(device *domain.ProductDevice) map[string]any {
+func productDeviceResponse(device *products.ProductDevice) map[string]any {
 	response := map[string]any{
 		"id":          device.ID,
 		"product_id":  device.ProductID,
@@ -410,7 +435,7 @@ func productDeviceResponse(device *domain.ProductDevice) map[string]any {
 	return response
 }
 
-func productDeviceDetailResponse(device *domain.Device, link *domain.ProductDevice) map[string]any {
+func productDeviceDetailResponse(device *devices.Device, link *products.ProductDevice) map[string]any {
 	response := deviceResponse(device)
 	for key, value := range productDeviceResponse(link) {
 		response[key] = value

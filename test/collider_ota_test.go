@@ -21,12 +21,12 @@ import (
 	"sparkserver/internal/events"
 	"sparkserver/internal/firmware"
 	"sparkserver/internal/httpapi"
+	jsonfile "sparkserver/internal/jsonfile"
 	"sparkserver/internal/protocol/coap"
 	protocoldevice "sparkserver/internal/protocol/device"
 	protocolkeys "sparkserver/internal/protocol/keys"
 	"sparkserver/internal/protocol/particle"
 	"sparkserver/internal/protocol/tcp"
-	filerepo "sparkserver/internal/repository/file"
 )
 
 func TestColliderVirtualDeviceReceivesAndReconstructsOTAFlash(t *testing.T) {
@@ -40,8 +40,8 @@ func TestColliderVirtualDeviceReceivesAndReconstructsOTAFlash(t *testing.T) {
 	}
 
 	authService := auth.NewService(
-		filerepo.NewUserRepository(filepath.Join(dir, "users")),
-		filerepo.NewAccessTokenRepository(filepath.Join(dir, "tokens")),
+		jsonfile.NewUserRepository(filepath.Join(dir, "users")),
+		jsonfile.NewAccessTokenRepository(filepath.Join(dir, "tokens")),
 		24*time.Hour,
 	)
 	if _, err := authService.CreateUser(ctx, "__test__@testaccount.com", "password"); err != nil {
@@ -49,15 +49,15 @@ func TestColliderVirtualDeviceReceivesAndReconstructsOTAFlash(t *testing.T) {
 	}
 
 	deviceService := devices.NewService(
-		filerepo.NewDeviceRepository(filepath.Join(dir, "devices")),
-		filerepo.NewDeviceClaimRepository(filepath.Join(dir, "deviceClaims")),
+		jsonfile.NewDeviceRepository(filepath.Join(dir, "devices")),
+		jsonfile.NewDeviceClaimRepository(filepath.Join(dir, "deviceClaims")),
+		devices.WithAPITimeout(2*time.Second),
 	)
-	deviceService.SetAPITimeout(2 * time.Second)
-	eventService := events.NewService(filerepo.NewEventRepository(filepath.Join(dir, "events")))
+	eventService := events.NewService(jsonfile.NewEventRepository(filepath.Join(dir, "events")))
 	firmwareService := firmware.NewService(
-		filerepo.NewProductFirmwareRepository(filepath.Join(dir, "firmware", "metadata")),
+		jsonfile.NewProductFirmwareRepository(filepath.Join(dir, "firmware", "metadata")),
 		filepath.Join(dir, "firmware", "binaries"),
-		filerepo.NewFlashJobRepository(filepath.Join(dir, "firmware", "flashJobs")),
+		jsonfile.NewFlashJobRepository(filepath.Join(dir, "firmware", "flashJobs")),
 	)
 	firmwareService.SetFlashChunkSize(5)
 	firmwareService.SetEventPublisher(eventService)
@@ -70,14 +70,11 @@ func TestColliderVirtualDeviceReceivesAndReconstructsOTAFlash(t *testing.T) {
 	deviceService.SetLiveClient(tcpServer)
 	firmwareService.SetFlashTransport(tcpServer)
 
-	httpHandler := httpapi.NewHandlerWithDeviceKeys(
-		authService,
-		deviceService,
-		eventService,
-		firmwareService,
-		nil,
-		nil,
-		keyManager,
+	httpHandler := httpapi.NewHandler(
+		httpapi.Dependencies{
+			Auth: authService, Devices: deviceService, Events: eventService,
+			Firmware: firmwareService, DeviceKeys: keyManager,
+		},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
 	token := loginColliderUser(t, httpHandler)
@@ -145,11 +142,11 @@ func TestColliderVirtualDeviceReceivesAndReconstructsOTAFlash(t *testing.T) {
 }
 
 func uploadColliderFirmware(
-	t           *testing.T,
+	t *testing.T,
 	httpHandler http.Handler,
-	token       string,
-	productID   string,
-	payload     []byte,
+	token string,
+	productID string,
+	payload []byte,
 ) {
 	t.Helper()
 
@@ -180,10 +177,10 @@ func assertBeginFlashPayload(t *testing.T, payload []byte, size int, chunkSize i
 }
 
 func assertAndAckOTAChunk(
-	t             *testing.T,
+	t *testing.T,
 	virtualDevice *liveColliderDevice,
-	request       *coap.Packet,
-	chunkSize     int,
+	request *coap.Packet,
+	chunkSize int,
 ) (int, []byte) {
 	t.Helper()
 

@@ -49,9 +49,9 @@ func (registry *Registry) Register(deviceID string, remoteAddr net.Addr) Connect
 
 // RegisterClient records both presence and the command bridge for a device.
 func (registry *Registry) RegisterClient(
-	deviceID   string,
+	deviceID string,
 	remoteAddr net.Addr,
-	client     *Client,
+	client *Client,
 ) Connection {
 	registry.mutex.Lock()
 	defer registry.mutex.Unlock()

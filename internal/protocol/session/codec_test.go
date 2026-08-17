@@ -1,5 +1,5 @@
 // Package test verifies session encryption, MAC, and padding checks.
-package test
+package session_test
 
 import (
 	"bytes"

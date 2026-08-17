@@ -1,5 +1,5 @@
 // Package test verifies firmware service storage and flash-job state.
-package test
+package firmware_test
 
 import (
 	"bytes"
@@ -10,19 +10,20 @@ import (
 	"testing"
 	"time"
 
-	"sparkserver/internal/domain"
-	"sparkserver/internal/events"
+	"sparkserver/internal/devices"
+	eventpkg "sparkserver/internal/events"
 	"sparkserver/internal/firmware"
-	filerepo "sparkserver/internal/repository/file"
+	jsonfile "sparkserver/internal/jsonfile"
+	"sparkserver/internal/products"
 )
 
 func TestFirmwareFlashJobManifestAndTransitions(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	dir := t.TempDir()
 	service := firmware.NewService(
-		filerepo.NewProductFirmwareRepository(dir+"/metadata"),
+		jsonfile.NewProductFirmwareRepository(dir+"/metadata"),
 		dir+"/binaries",
-		filerepo.NewFlashJobRepository(dir+"/flashJobs"),
+		jsonfile.NewFlashJobRepository(dir+"/flashJobs"),
 	)
 	service.SetFlashChunkSize(512)
 
@@ -100,12 +101,12 @@ func TestFirmwareFlashJobManifestAndTransitions(t *testing.T) {
 }
 
 func TestFirmwareFlashJobFailureTransition(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	dir := t.TempDir()
 	service := firmware.NewService(
-		filerepo.NewProductFirmwareRepository(dir+"/metadata"),
+		jsonfile.NewProductFirmwareRepository(dir+"/metadata"),
 		dir+"/binaries",
-		filerepo.NewFlashJobRepository(dir+"/flashJobs"),
+		jsonfile.NewFlashJobRepository(dir+"/flashJobs"),
 	)
 
 	uploaded, err := service.UploadProductFirmware(ctx, firmware.Upload{
@@ -137,12 +138,12 @@ func TestFirmwareFlashJobFailureTransition(t *testing.T) {
 }
 
 func TestFirmwareReleaseDefaultAndUpdateCheck(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	dir := t.TempDir()
 	service := firmware.NewService(
-		filerepo.NewProductFirmwareRepository(dir+"/metadata"),
+		jsonfile.NewProductFirmwareRepository(dir+"/metadata"),
 		dir+"/binaries",
-		filerepo.NewFlashJobRepository(dir+"/flashJobs"),
+		jsonfile.NewFlashJobRepository(dir+"/flashJobs"),
 	)
 
 	first, err := service.UploadProductFirmware(ctx, firmware.Upload{
@@ -213,12 +214,12 @@ func TestFirmwareReleaseDefaultAndUpdateCheck(t *testing.T) {
 }
 
 func TestFirmwareAutoUpdateQueuesDefaultFirmware(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	dir := t.TempDir()
 	service := firmware.NewService(
-		filerepo.NewProductFirmwareRepository(dir+"/metadata"),
+		jsonfile.NewProductFirmwareRepository(dir+"/metadata"),
 		dir+"/binaries",
-		filerepo.NewFlashJobRepository(dir+"/flashJobs"),
+		jsonfile.NewFlashJobRepository(dir+"/flashJobs"),
 	)
 
 	uploaded, err := service.UploadProductFirmware(ctx, firmware.Upload{
@@ -232,7 +233,7 @@ func TestFirmwareAutoUpdateQueuesDefaultFirmware(t *testing.T) {
 		t.Fatalf("upload firmware: %v", err)
 	}
 
-	job, started, err := service.CheckAndStartProductFirmwareUpdate(ctx, &domain.Device{
+	job, started, err := service.CheckAndStartProductFirmwareUpdate(ctx, &devices.Device{
 		ID:        "device-1",
 		ProductID: "product-1",
 		Attributes: map[string]string{
@@ -246,7 +247,7 @@ func TestFirmwareAutoUpdateQueuesDefaultFirmware(t *testing.T) {
 		t.Fatalf("job = %#v started=%v", job, started)
 	}
 
-	duplicate, started, err := service.CheckAndStartProductFirmwareUpdate(ctx, &domain.Device{
+	duplicate, started, err := service.CheckAndStartProductFirmwareUpdate(ctx, &devices.Device{
 		ID:        "device-1",
 		ProductID: "product-1",
 		Attributes: map[string]string{
@@ -262,13 +263,13 @@ func TestFirmwareAutoUpdateQueuesDefaultFirmware(t *testing.T) {
 }
 
 func TestFirmwareAutoUpdateUsesDesiredProductDeviceVersion(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	dir := t.TempDir()
-	productDevices := filerepo.NewProductDeviceRepository(dir + "/productDevices")
+	productDevices := jsonfile.NewProductDeviceRepository(dir + "/productDevices")
 	service := firmware.NewService(
-		filerepo.NewProductFirmwareRepository(dir+"/metadata"),
+		jsonfile.NewProductFirmwareRepository(dir+"/metadata"),
 		dir+"/binaries",
-		filerepo.NewFlashJobRepository(dir+"/flashJobs"),
+		jsonfile.NewFlashJobRepository(dir+"/flashJobs"),
 	)
 	service.SetProductDeviceResolver(productDevices)
 
@@ -292,7 +293,7 @@ func TestFirmwareAutoUpdateUsesDesiredProductDeviceVersion(t *testing.T) {
 		t.Fatalf("upload desired firmware: %v", err)
 	}
 	desiredVersion := 2
-	if err := productDevices.Create(ctx, &domain.ProductDevice{
+	if err := productDevices.Create(ctx, &products.ProductDevice{
 		ID:                     "link-1",
 		ProductID:              "product-1",
 		DeviceID:               "device-1",
@@ -301,7 +302,7 @@ func TestFirmwareAutoUpdateUsesDesiredProductDeviceVersion(t *testing.T) {
 		t.Fatalf("create product device: %v", err)
 	}
 
-	job, started, err := service.CheckAndStartProductFirmwareUpdate(ctx, &domain.Device{
+	job, started, err := service.CheckAndStartProductFirmwareUpdate(ctx, &devices.Device{
 		ID:        "device-1",
 		ProductID: "product-1",
 		Attributes: map[string]string{
@@ -317,13 +318,13 @@ func TestFirmwareAutoUpdateUsesDesiredProductDeviceVersion(t *testing.T) {
 }
 
 func TestFirmwareFlashJobTransportNegotiationStartsJob(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	dir := t.TempDir()
 	transport := &fakeFlashTransport{}
 	service := firmware.NewService(
-		filerepo.NewProductFirmwareRepository(dir+"/metadata"),
+		jsonfile.NewProductFirmwareRepository(dir+"/metadata"),
 		dir+"/binaries",
-		filerepo.NewFlashJobRepository(dir+"/flashJobs"),
+		jsonfile.NewFlashJobRepository(dir+"/flashJobs"),
 	)
 	service.SetFlashTransport(transport)
 
@@ -358,13 +359,13 @@ func TestFirmwareFlashJobTransportNegotiationStartsJob(t *testing.T) {
 }
 
 func TestFirmwareStartDeviceFlashPumpsAllChunks(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	dir := t.TempDir()
 	transport := &fakeFlashTransport{}
 	service := firmware.NewService(
-		filerepo.NewProductFirmwareRepository(dir+"/metadata"),
+		jsonfile.NewProductFirmwareRepository(dir+"/metadata"),
 		dir+"/binaries",
-		filerepo.NewFlashJobRepository(dir+"/flashJobs"),
+		jsonfile.NewFlashJobRepository(dir+"/flashJobs"),
 	)
 	service.SetFlashChunkSize(2)
 	service.SetFlashTransport(transport)
@@ -400,13 +401,13 @@ func TestFirmwareStartDeviceFlashPumpsAllChunks(t *testing.T) {
 }
 
 func TestFirmwareFlashJobTransportFailurePersistsFailedJob(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	dir := t.TempDir()
 	transport := &fakeFlashTransport{err: errors.New("device rejected flash")}
 	service := firmware.NewService(
-		filerepo.NewProductFirmwareRepository(dir+"/metadata"),
+		jsonfile.NewProductFirmwareRepository(dir+"/metadata"),
 		dir+"/binaries",
-		filerepo.NewFlashJobRepository(dir+"/flashJobs"),
+		jsonfile.NewFlashJobRepository(dir+"/flashJobs"),
 	)
 	service.SetFlashTransport(transport)
 
@@ -442,13 +443,13 @@ func TestFirmwareFlashJobTransportFailurePersistsFailedJob(t *testing.T) {
 }
 
 func TestFirmwareSendNextFlashChunkMarksProgressOnAck(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	dir := t.TempDir()
 	transport := &fakeFlashTransport{}
 	service := firmware.NewService(
-		filerepo.NewProductFirmwareRepository(dir+"/metadata"),
+		jsonfile.NewProductFirmwareRepository(dir+"/metadata"),
 		dir+"/binaries",
-		filerepo.NewFlashJobRepository(dir+"/flashJobs"),
+		jsonfile.NewFlashJobRepository(dir+"/flashJobs"),
 	)
 	service.SetFlashChunkSize(2)
 
@@ -493,13 +494,13 @@ func TestFirmwareSendNextFlashChunkMarksProgressOnAck(t *testing.T) {
 }
 
 func TestFirmwareSendFlashChunkFailureMarksJobFailed(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	dir := t.TempDir()
 	transport := &fakeFlashTransport{chunkErr: errors.New("chunk rejected")}
 	service := firmware.NewService(
-		filerepo.NewProductFirmwareRepository(dir+"/metadata"),
+		jsonfile.NewProductFirmwareRepository(dir+"/metadata"),
 		dir+"/binaries",
-		filerepo.NewFlashJobRepository(dir+"/flashJobs"),
+		jsonfile.NewFlashJobRepository(dir+"/flashJobs"),
 	)
 
 	uploaded, err := service.UploadProductFirmware(ctx, firmware.Upload{
@@ -532,13 +533,13 @@ func TestFirmwareSendFlashChunkFailureMarksJobFailed(t *testing.T) {
 }
 
 func TestFirmwareRetryMissedFlashChunksResendsRequestedChunks(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	dir := t.TempDir()
 	transport := &fakeFlashTransport{}
 	service := firmware.NewService(
-		filerepo.NewProductFirmwareRepository(dir+"/metadata"),
+		jsonfile.NewProductFirmwareRepository(dir+"/metadata"),
 		dir+"/binaries",
-		filerepo.NewFlashJobRepository(dir+"/flashJobs"),
+		jsonfile.NewFlashJobRepository(dir+"/flashJobs"),
 	)
 	service.SetFlashChunkSize(2)
 
@@ -587,12 +588,12 @@ func TestFirmwareRetryMissedFlashChunksResendsRequestedChunks(t *testing.T) {
 }
 
 func TestFirmwareAbortDeviceFlashMarksActiveJobFailed(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	dir := t.TempDir()
 	service := firmware.NewService(
-		filerepo.NewProductFirmwareRepository(dir+"/metadata"),
+		jsonfile.NewProductFirmwareRepository(dir+"/metadata"),
 		dir+"/binaries",
-		filerepo.NewFlashJobRepository(dir+"/flashJobs"),
+		jsonfile.NewFlashJobRepository(dir+"/flashJobs"),
 	)
 
 	uploaded, err := service.UploadProductFirmware(ctx, firmware.Upload{
@@ -622,19 +623,19 @@ func TestFirmwareAbortDeviceFlashMarksActiveJobFailed(t *testing.T) {
 }
 
 func TestFirmwareFlashJobPublishesProgressEvents(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	dir := t.TempDir()
-	eventService := events.NewService(nil)
+	eventService := eventpkg.NewService(nil)
 	service := firmware.NewService(
-		filerepo.NewProductFirmwareRepository(dir+"/metadata"),
+		jsonfile.NewProductFirmwareRepository(dir+"/metadata"),
 		dir+"/binaries",
-		filerepo.NewFlashJobRepository(dir+"/flashJobs"),
+		jsonfile.NewFlashJobRepository(dir+"/flashJobs"),
 	)
 	service.SetEventPublisher(eventService)
 
 	subscriptionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	events := eventService.Subscribe(subscriptionCtx, events.Filter{Prefix: "spark/flash/", DeviceID: "device-1"})
+	events := eventService.Subscribe(subscriptionCtx, eventpkg.Filter{Prefix: "spark/flash/", DeviceID: "device-1"})
 
 	uploaded, err := service.UploadProductFirmware(ctx, firmware.Upload{
 		ProductID: "product-1",
@@ -676,10 +677,10 @@ func TestFirmwareFlashJobPublishesProgressEvents(t *testing.T) {
 
 type fakeFlashTransport struct {
 	deviceID string
-	job      *domain.FlashJob
-	chunk    domain.OTAChunk
+	job      *firmware.FlashJob
+	chunk    firmware.OTAChunk
 	data     []byte
-	chunks   []domain.OTAChunk
+	chunks   []firmware.OTAChunk
 	payloads [][]byte
 	err      error
 	chunkErr error
@@ -688,7 +689,7 @@ type fakeFlashTransport struct {
 func (transport *fakeFlashTransport) BeginFlash(
 	_ context.Context,
 	deviceID string,
-	job      *domain.FlashJob,
+	job *firmware.FlashJob,
 ) error {
 	transport.deviceID = deviceID
 	transport.job = job
@@ -698,9 +699,9 @@ func (transport *fakeFlashTransport) BeginFlash(
 func (transport *fakeFlashTransport) SendFlashChunk(
 	_ context.Context,
 	deviceID string,
-	job      *domain.FlashJob,
-	chunk    domain.OTAChunk,
-	data     []byte,
+	job *firmware.FlashJob,
+	chunk firmware.OTAChunk,
+	data []byte,
 ) error {
 	transport.deviceID = deviceID
 	transport.job = job
@@ -711,7 +712,7 @@ func (transport *fakeFlashTransport) SendFlashChunk(
 	return transport.chunkErr
 }
 
-func receiveFlashEvent(t *testing.T, events <-chan domain.Event) domain.Event {
+func receiveFlashEvent(t *testing.T, events <-chan eventpkg.Event) eventpkg.Event {
 	t.Helper()
 	select {
 	case event := <-events:
@@ -719,5 +720,5 @@ func receiveFlashEvent(t *testing.T, events <-chan domain.Event) domain.Event {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for flash event")
 	}
-	return domain.Event{}
+	return eventpkg.Event{}
 }

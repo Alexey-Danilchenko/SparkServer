@@ -15,14 +15,14 @@ import (
 
 	"sparkserver/internal/auth"
 	"sparkserver/internal/httpapi"
-	filerepo "sparkserver/internal/repository/file"
+	jsonfile "sparkserver/internal/jsonfile"
 )
 
 func TestOAuthTokenAndAccessTokenRoutes(t *testing.T) {
 	dir := t.TempDir()
 	authService := auth.NewService(
-		filerepo.NewUserRepository(filepath.Join(dir, "users")),
-		filerepo.NewAccessTokenRepository(filepath.Join(dir, "tokens")),
+		jsonfile.NewUserRepository(filepath.Join(dir, "users")),
+		jsonfile.NewAccessTokenRepository(filepath.Join(dir, "tokens")),
 		24*time.Hour,
 	)
 
@@ -30,7 +30,7 @@ func TestOAuthTokenAndAccessTokenRoutes(t *testing.T) {
 		t.Fatalf("ensure default admin: %v", err)
 	}
 
-	handler := httpapi.NewHandler(authService, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	handler := httpapi.NewHandler(httpapi.Dependencies{Auth: authService}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	tokenResponse := postForm(t, handler, "/oauth/token", "grant_type=password&username=__admin__&password=adminPassword")
 
 	if tokenResponse.Code != http.StatusOK {
@@ -82,12 +82,12 @@ func TestOAuthTokenAndAccessTokenRoutes(t *testing.T) {
 func TestCreateUserAndLogin(t *testing.T) {
 	dir := t.TempDir()
 	authService := auth.NewService(
-		filerepo.NewUserRepository(filepath.Join(dir, "users")),
-		filerepo.NewAccessTokenRepository(filepath.Join(dir, "tokens")),
+		jsonfile.NewUserRepository(filepath.Join(dir, "users")),
+		jsonfile.NewAccessTokenRepository(filepath.Join(dir, "tokens")),
 		24*time.Hour,
 	)
 
-	handler := httpapi.NewHandler(authService, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	handler := httpapi.NewHandler(httpapi.Dependencies{Auth: authService}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	createRequest := httptest.NewRequest(http.MethodPost, "/v1/users", strings.NewReader(`{"username":"alice","password":"secret"}`))
 	createRequest.Header.Set("Content-Type", "application/json")
 	createResponse := httptest.NewRecorder()
@@ -106,8 +106,8 @@ func TestCreateUserAndLogin(t *testing.T) {
 func TestOAuthRejectsBadPassword(t *testing.T) {
 	dir := t.TempDir()
 	authService := auth.NewService(
-		filerepo.NewUserRepository(filepath.Join(dir, "users")),
-		filerepo.NewAccessTokenRepository(filepath.Join(dir, "tokens")),
+		jsonfile.NewUserRepository(filepath.Join(dir, "users")),
+		jsonfile.NewAccessTokenRepository(filepath.Join(dir, "tokens")),
 		24*time.Hour,
 	)
 
@@ -115,7 +115,7 @@ func TestOAuthRejectsBadPassword(t *testing.T) {
 		t.Fatalf("ensure default admin: %v", err)
 	}
 
-	handler := httpapi.NewHandler(authService, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	handler := httpapi.NewHandler(httpapi.Dependencies{Auth: authService}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	response := postForm(t, handler, "/oauth/token", "grant_type=password&username=__admin__&password=wrong")
 
 	if response.Code != http.StatusUnauthorized {
@@ -124,10 +124,10 @@ func TestOAuthRejectsBadPassword(t *testing.T) {
 }
 
 func postForm(
-	t       *testing.T,
+	t *testing.T,
 	handler http.Handler,
-	path    string,
-	body    string,
+	path string,
+	body string,
 ) *httptest.ResponseRecorder {
 	t.Helper()
 

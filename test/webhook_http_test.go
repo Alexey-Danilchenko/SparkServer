@@ -17,8 +17,8 @@ import (
 	"sparkserver/internal/events"
 	"sparkserver/internal/firmware"
 	"sparkserver/internal/httpapi"
+	jsonfile "sparkserver/internal/jsonfile"
 	"sparkserver/internal/products"
-	filerepo "sparkserver/internal/repository/file"
 	"sparkserver/internal/webhooks"
 )
 
@@ -160,26 +160,26 @@ func newAuthenticatedWebhookHandler(t *testing.T) (http.Handler, string) {
 
 	dir := t.TempDir()
 	authService := auth.NewService(
-		filerepo.NewUserRepository(filepath.Join(dir, "users")),
-		filerepo.NewAccessTokenRepository(filepath.Join(dir, "tokens")),
+		jsonfile.NewUserRepository(filepath.Join(dir, "users")),
+		jsonfile.NewAccessTokenRepository(filepath.Join(dir, "tokens")),
 		24*time.Hour,
 	)
-	deviceRepository := filerepo.NewDeviceRepository(filepath.Join(dir, "devices"))
+	deviceRepository := jsonfile.NewDeviceRepository(filepath.Join(dir, "devices"))
 	deviceService := devices.NewService(
 		deviceRepository,
-		filerepo.NewDeviceClaimRepository(filepath.Join(dir, "deviceClaims")),
+		jsonfile.NewDeviceClaimRepository(filepath.Join(dir, "deviceClaims")),
 	)
-	eventService := events.NewService(filerepo.NewEventRepository(filepath.Join(dir, "events")))
-	webhookService := webhooks.NewService(filerepo.NewWebhookRepository(filepath.Join(dir, "webhooks")))
+	eventService := events.NewService(jsonfile.NewEventRepository(filepath.Join(dir, "events")))
+	webhookService := webhooks.NewService(jsonfile.NewWebhookRepository(filepath.Join(dir, "webhooks")))
 	eventService.AddSink(webhookService)
 	firmwareService := firmware.NewService(
-		filerepo.NewProductFirmwareRepository(filepath.Join(dir, "firmware", "metadata")),
+		jsonfile.NewProductFirmwareRepository(filepath.Join(dir, "firmware", "metadata")),
 		filepath.Join(dir, "firmware", "binaries"),
-		filerepo.NewFlashJobRepository(filepath.Join(dir, "firmware", "flashJobs")),
+		jsonfile.NewFlashJobRepository(filepath.Join(dir, "firmware", "flashJobs")),
 	)
 	productService := products.NewService(
-		filerepo.NewProductRepository(filepath.Join(dir, "products")),
-		filerepo.NewProductDeviceRepository(filepath.Join(dir, "products", "devices")),
+		jsonfile.NewProductRepository(filepath.Join(dir, "products")),
+		jsonfile.NewProductDeviceRepository(filepath.Join(dir, "products", "devices")),
 		deviceRepository,
 	)
 
@@ -187,13 +187,11 @@ func newAuthenticatedWebhookHandler(t *testing.T) (http.Handler, string) {
 		t.Fatalf("ensure default admin: %v", err)
 	}
 
-	handler := httpapi.NewHandlerWithServices(
-		authService,
-		deviceService,
-		eventService,
-		firmwareService,
-		productService,
-		webhookService,
+	handler := httpapi.NewHandler(
+		httpapi.Dependencies{
+			Auth: authService, Devices: deviceService, Events: eventService,
+			Firmware: firmwareService, Products: productService, Webhooks: webhookService,
+		},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
 	response := postForm(t, handler, "/oauth/token", "grant_type=password&username=__admin__&password=adminPassword")

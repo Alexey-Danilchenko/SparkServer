@@ -16,21 +16,21 @@ import (
 	"sparkserver/internal/auth"
 	"sparkserver/internal/devices"
 	"sparkserver/internal/httpapi"
+	jsonfile "sparkserver/internal/jsonfile"
 	protocolkeys "sparkserver/internal/protocol/keys"
-	filerepo "sparkserver/internal/repository/file"
 	"sparkserver/test/collider"
 )
 
 func TestColliderGeneratedDeviceRegistersPublicKeyAndGetsClaimed(t *testing.T) {
 	dir := t.TempDir()
 	authService := auth.NewService(
-		filerepo.NewUserRepository(filepath.Join(dir, "users")),
-		filerepo.NewAccessTokenRepository(filepath.Join(dir, "tokens")),
+		jsonfile.NewUserRepository(filepath.Join(dir, "users")),
+		jsonfile.NewAccessTokenRepository(filepath.Join(dir, "tokens")),
 		24*time.Hour,
 	)
 	deviceService := devices.NewService(
-		filerepo.NewDeviceRepository(filepath.Join(dir, "devices")),
-		filerepo.NewDeviceClaimRepository(filepath.Join(dir, "deviceClaims")),
+		jsonfile.NewDeviceRepository(filepath.Join(dir, "devices")),
+		jsonfile.NewDeviceClaimRepository(filepath.Join(dir, "deviceClaims")),
 	)
 	keyManager := protocolkeys.NewManager(filepath.Join(dir, "keys"))
 
@@ -38,14 +38,8 @@ func TestColliderGeneratedDeviceRegistersPublicKeyAndGetsClaimed(t *testing.T) {
 		t.Fatalf("create collider user: %v", err)
 	}
 
-	handler := httpapi.NewHandlerWithDeviceKeys(
-		authService,
-		deviceService,
-		nil,
-		nil,
-		nil,
-		nil,
-		keyManager,
+	handler := httpapi.NewHandler(
+		httpapi.Dependencies{Auth: authService, Devices: deviceService, DeviceKeys: keyManager},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
 	tokenResponse := postForm(t, handler, "/oauth/token", "grant_type=password&username=__test__@testaccount.com&password=password")

@@ -16,7 +16,7 @@ import (
 	"sparkserver/internal/auth"
 	"sparkserver/internal/devices"
 	"sparkserver/internal/httpapi"
-	filerepo "sparkserver/internal/repository/file"
+	jsonfile "sparkserver/internal/jsonfile"
 )
 
 func TestDeviceRoutes(t *testing.T) {
@@ -216,9 +216,8 @@ func TestDeviceVariableAndFunctionRoutesUseLiveClient(t *testing.T) {
 }
 
 func TestDeviceVariableRouteTimesOut(t *testing.T) {
-	handler, token, deviceService, liveClient := newAuthenticatedDeviceHandlerWithService(t)
+	handler, token, deviceService, liveClient := newAuthenticatedDeviceHandlerWithService(t, devices.WithAPITimeout(5*time.Millisecond))
 	liveClient.blockUntilDone = true
-	deviceService.SetAPITimeout(5 * time.Millisecond)
 
 	claim := authedRequest(http.MethodPost, "/v1/devices", `{"id":"device-1"}`, token)
 	claim.Header.Set("Content-Type", "application/json")
@@ -251,18 +250,20 @@ func newAuthenticatedDeviceHandler(t *testing.T) (http.Handler, string) {
 
 func newAuthenticatedDeviceHandlerWithService(
 	t *testing.T,
+	options ...devices.Option,
 ) (http.Handler, string, *devices.Service, *mockLiveDeviceClient) {
 	t.Helper()
 
 	dir := t.TempDir()
 	authService := auth.NewService(
-		filerepo.NewUserRepository(filepath.Join(dir, "users")),
-		filerepo.NewAccessTokenRepository(filepath.Join(dir, "tokens")),
+		jsonfile.NewUserRepository(filepath.Join(dir, "users")),
+		jsonfile.NewAccessTokenRepository(filepath.Join(dir, "tokens")),
 		24*time.Hour,
 	)
 	deviceService := devices.NewService(
-		filerepo.NewDeviceRepository(filepath.Join(dir, "devices")),
-		filerepo.NewDeviceClaimRepository(filepath.Join(dir, "deviceClaims")),
+		jsonfile.NewDeviceRepository(filepath.Join(dir, "devices")),
+		jsonfile.NewDeviceClaimRepository(filepath.Join(dir, "deviceClaims")),
+		options...,
 	)
 	liveClient := &mockLiveDeviceClient{
 		variables:       make(map[string]string),
@@ -274,7 +275,7 @@ func newAuthenticatedDeviceHandlerWithService(
 		t.Fatalf("ensure default admin: %v", err)
 	}
 
-	handler := httpapi.NewHandler(authService, deviceService, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	handler := httpapi.NewHandler(httpapi.Dependencies{Auth: authService, Devices: deviceService}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	response := postForm(t, handler, "/oauth/token", "grant_type=password&username=__admin__&password=adminPassword")
 	if response.Code != http.StatusOK {
 		t.Fatalf("token status = %d body = %s", response.Code, response.Body.String())
@@ -309,8 +310,8 @@ type mockLiveDeviceClient struct {
 }
 
 func (client *mockLiveDeviceClient) GetVariable(
-	ctx          context.Context,
-	deviceID     string,
+	ctx context.Context,
+	deviceID string,
 	variableName string,
 ) (string, error) {
 	if client.blockUntilDone {
@@ -321,10 +322,10 @@ func (client *mockLiveDeviceClient) GetVariable(
 }
 
 func (client *mockLiveDeviceClient) CallFunction(
-	ctx          context.Context,
-	deviceID     string,
+	ctx context.Context,
+	deviceID string,
 	functionName string,
-	argument     string,
+	argument string,
 ) (int, error) {
 	if client.blockUntilDone {
 		<-ctx.Done()

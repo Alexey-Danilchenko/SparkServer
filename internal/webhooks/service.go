@@ -15,8 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"sparkserver/internal/domain"
-	"sparkserver/internal/repository"
+	"sparkserver/internal/events"
 )
 
 // Request is the normalized create/update input accepted by HTTP handlers.
@@ -31,29 +30,39 @@ type Request struct {
 
 // Service stores webhook definitions and delivers matching events over HTTP.
 type Service struct {
-	webhooks repository.WebhookRepository
+	webhooks Store
 	client   *http.Client
 	clock    func() time.Time
 }
 
+// Option configures optional webhook delivery behavior.
+type Option func(*Service)
+
+// WithHTTPClient overrides the default webhook delivery client.
+func WithHTTPClient(client *http.Client) Option {
+	return func(service *Service) {
+		if client != nil {
+			service.client = client
+		}
+	}
+}
+
 // NewService creates a webhook manager with a conservative HTTP timeout.
-func NewService(webhooks repository.WebhookRepository) *Service {
-	return &Service{
+func NewService(webhooks Store, options ...Option) *Service {
+	service := &Service{
 		webhooks: webhooks,
 		client:   &http.Client{Timeout: 5 * time.Second},
 		clock:    time.Now,
 	}
-}
-
-func (service *Service) SetHTTPClient(client *http.Client) {
-	if client != nil {
-		service.client = client
+	for _, option := range options {
+		option(service)
 	}
+	return service
 }
 
-func (service *Service) Create(ctx context.Context, request Request) (*domain.Webhook, error) {
+func (service *Service) Create(ctx context.Context, request Request) (*Webhook, error) {
 	if request.OwnerID == "" || request.Event == "" || request.URL == "" {
-		return nil, repository.ErrNotFound
+		return nil, ErrNotFound
 	}
 
 	method := strings.ToUpper(request.Method)
@@ -62,7 +71,7 @@ func (service *Service) Create(ctx context.Context, request Request) (*domain.We
 	}
 
 	now := service.clock().UTC()
-	webhook := &domain.Webhook{
+	webhook := &Webhook{
 		ID:        newWebhookID(),
 		OwnerID:   request.OwnerID,
 		Event:     request.Event,
@@ -79,16 +88,16 @@ func (service *Service) Create(ctx context.Context, request Request) (*domain.We
 	return webhook, service.webhooks.Create(ctx, webhook)
 }
 
-func (service *Service) List(ctx context.Context, ownerID string) ([]domain.Webhook, error) {
+func (service *Service) List(ctx context.Context, ownerID string) ([]Webhook, error) {
 	if service.webhooks == nil {
-		return []domain.Webhook{}, nil
+		return []Webhook{}, nil
 	}
 	webhooks, err := service.webhooks.List(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	matches := make([]domain.Webhook, 0)
+	matches := make([]Webhook, 0)
 	for _, webhook := range webhooks {
 		if webhook.OwnerID == ownerID {
 			matches = append(matches, webhook)
@@ -101,29 +110,29 @@ func (service *Service) List(ctx context.Context, ownerID string) ([]domain.Webh
 }
 
 func (service *Service) Get(
-	ctx     context.Context,
+	ctx context.Context,
 	ownerID string,
-	id      string,
-) (*domain.Webhook, error) {
+	id string,
+) (*Webhook, error) {
 	if id == "" || service.webhooks == nil {
-		return nil, repository.ErrNotFound
+		return nil, ErrNotFound
 	}
 	webhook, err := service.webhooks.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	if webhook.OwnerID != ownerID {
-		return nil, repository.ErrNotFound
+		return nil, ErrNotFound
 	}
 	return webhook, nil
 }
 
 func (service *Service) Update(
-	ctx     context.Context,
+	ctx context.Context,
 	ownerID string,
-	id      string,
+	id string,
 	request Request,
-) (*domain.Webhook, error) {
+) (*Webhook, error) {
 	webhook, err := service.Get(ctx, ownerID, id)
 	if err != nil {
 		return nil, err
@@ -160,7 +169,7 @@ func (service *Service) Delete(ctx context.Context, ownerID string, id string) e
 }
 
 // DeliverEvent implements events.Sink and applies matching plus retry backoff.
-func (service *Service) DeliverEvent(ctx context.Context, event domain.Event) error {
+func (service *Service) DeliverEvent(ctx context.Context, event events.Event) error {
 	if service.webhooks == nil || service.client == nil {
 		return nil
 	}
@@ -186,9 +195,9 @@ func (service *Service) DeliverEvent(ctx context.Context, event domain.Event) er
 }
 
 func (service *Service) deliver(
-	ctx     context.Context,
-	webhook *domain.Webhook,
-	event   domain.Event,
+	ctx context.Context,
+	webhook *Webhook,
+	event events.Event,
 ) error {
 	body, contentType, err := bodyFor(webhook, event)
 	if err != nil {
@@ -224,14 +233,14 @@ func (service *Service) deliver(
 	return nil
 }
 
-func (service *Service) shouldAttempt(webhook *domain.Webhook) bool {
+func (service *Service) shouldAttempt(webhook *Webhook) bool {
 	if webhook.NextAttemptAt == nil {
 		return true
 	}
 	return !service.clock().UTC().Before(*webhook.NextAttemptAt)
 }
 
-func (service *Service) recordSuccess(ctx context.Context, webhook *domain.Webhook, status int) {
+func (service *Service) recordSuccess(ctx context.Context, webhook *Webhook, status int) {
 	now := service.clock().UTC()
 	webhook.FailCount = 0
 	webhook.LastStatus = status
@@ -245,9 +254,9 @@ func (service *Service) recordSuccess(ctx context.Context, webhook *domain.Webho
 }
 
 func (service *Service) recordFailure(
-	ctx     context.Context,
-	webhook *domain.Webhook,
-	status  int,
+	ctx context.Context,
+	webhook *Webhook,
+	status int,
 	message string,
 ) {
 	now := service.clock().UTC()
@@ -262,7 +271,7 @@ func (service *Service) recordFailure(
 	}
 }
 
-func matches(webhook domain.Webhook, event domain.Event) bool {
+func matches(webhook Webhook, event events.Event) bool {
 	if webhook.Event == "*" || webhook.Event == event.Name {
 		return true
 	}
@@ -270,7 +279,7 @@ func matches(webhook domain.Webhook, event domain.Event) bool {
 	return ok && strings.HasPrefix(event.Name, prefix)
 }
 
-func bodyFor(webhook *domain.Webhook, event domain.Event) ([]byte, string, error) {
+func bodyFor(webhook *Webhook, event events.Event) ([]byte, string, error) {
 	if webhook.Body != "" {
 		return []byte(expandTemplate(webhook.Body, event)), "application/json", nil
 	}
@@ -287,7 +296,7 @@ func bodyFor(webhook *domain.Webhook, event domain.Event) ([]byte, string, error
 	return body, "application/json", err
 }
 
-func expandTemplate(template string, event domain.Event) string {
+func expandTemplate(template string, event events.Event) string {
 	replacements := map[string]string{
 		"{{event}}":        event.Name,
 		"{{name}}":         event.Name,

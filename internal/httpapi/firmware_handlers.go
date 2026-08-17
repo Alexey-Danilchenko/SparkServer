@@ -10,24 +10,42 @@ import (
 	"strconv"
 	"strings"
 
-	"sparkserver/internal/domain"
+	"sparkserver/internal/auth"
+	"sparkserver/internal/devices"
 	"sparkserver/internal/firmware"
 )
 
+func registerFirmwareRoutes(
+	router *http.ServeMux,
+	authService *auth.Service,
+	firmwareService FirmwareService,
+) {
+	router.Handle("GET /v1/products/{productIDOrSlug}/firmware", requireAuth(authService, http.HandlerFunc(listProductFirmwaresHandler(firmwareService))))
+	router.Handle("POST /v1/products/{productIDOrSlug}/firmware", requireAuth(authService, http.HandlerFunc(uploadProductFirmwareHandler(firmwareService))))
+	router.Handle("GET /v1/products/{productIDOrSlug}/firmware/check", requireAuth(authService, http.HandlerFunc(checkProductFirmwareUpdateHandler(firmwareService))))
+	router.Handle("GET /v1/products/{productIDOrSlug}/firmware/{firmwareID}", requireAuth(authService, http.HandlerFunc(getProductFirmwareHandler(firmwareService))))
+	router.Handle("PUT /v1/products/{productIDOrSlug}/firmware/{firmwareID}", requireAuth(authService, http.HandlerFunc(updateProductFirmwareHandler(firmwareService))))
+	router.Handle("DELETE /v1/products/{productIDOrSlug}/firmware/{firmwareID}", requireAuth(authService, http.HandlerFunc(deleteProductFirmwareHandler(firmwareService))))
+	router.Handle("PUT /v1/products/{productIDOrSlug}/firmware/{firmwareID}/release", requireAuth(authService, http.HandlerFunc(releaseProductFirmwareHandler(firmwareService))))
+	router.Handle("POST /v1/products/{productIDOrSlug}/firmware/{firmwareID}/release", requireAuth(authService, http.HandlerFunc(releaseProductFirmwareHandler(firmwareService))))
+	router.Handle("PUT /v1/products/{productIDOrSlug}/firmware/{firmwareID}/default", requireAuth(authService, http.HandlerFunc(defaultProductFirmwareHandler(firmwareService))))
+	router.Handle("POST /v1/products/{productIDOrSlug}/firmware/{firmwareID}/default", requireAuth(authService, http.HandlerFunc(defaultProductFirmwareHandler(firmwareService))))
+}
+
 // FirmwareService is the HTTP-facing subset implemented by firmware.Service.
 type FirmwareService interface {
-	UploadProductFirmware(ctx context.Context, upload firmware.Upload) (*domain.ProductFirmware, error)
-	ListProductFirmware(ctx context.Context, productID string) ([]domain.ProductFirmware, error)
-	GetProductFirmware(ctx context.Context, productID string, firmwareID string) (*domain.ProductFirmware, error)
-	UpdateProductFirmware(ctx context.Context, productID string, firmwareID string, update firmware.Update) (*domain.ProductFirmware, error)
+	UploadProductFirmware(ctx context.Context, upload firmware.Upload) (*firmware.ProductFirmware, error)
+	ListProductFirmware(ctx context.Context, productID string) ([]firmware.ProductFirmware, error)
+	GetProductFirmware(ctx context.Context, productID string, firmwareID string) (*firmware.ProductFirmware, error)
+	UpdateProductFirmware(ctx context.Context, productID string, firmwareID string, update firmware.Update) (*firmware.ProductFirmware, error)
 	DeleteProductFirmware(ctx context.Context, productID string, firmwareID string) error
-	ReleaseProductFirmware(ctx context.Context, productID string, firmwareID string) (*domain.ProductFirmware, error)
-	SetDefaultProductFirmware(ctx context.Context, productID string, firmwareID string) (*domain.ProductFirmware, error)
-	CheckProductFirmwareUpdate(ctx context.Context, request firmware.UpdateCheckRequest) (*domain.ProductFirmware, bool, error)
-	CheckAndStartProductFirmwareUpdate(ctx context.Context, device *domain.Device) (*domain.FlashJob, bool, error)
-	StartDeviceFlash(ctx context.Context, request firmware.FlashRequest) (*domain.FlashJob, error)
-	ListDeviceFlashJobs(ctx context.Context, deviceID string) ([]domain.FlashJob, error)
-	GetDeviceFlashJob(ctx context.Context, deviceID string, jobID string) (*domain.FlashJob, error)
+	ReleaseProductFirmware(ctx context.Context, productID string, firmwareID string) (*firmware.ProductFirmware, error)
+	SetDefaultProductFirmware(ctx context.Context, productID string, firmwareID string) (*firmware.ProductFirmware, error)
+	CheckProductFirmwareUpdate(ctx context.Context, request firmware.UpdateCheckRequest) (*firmware.ProductFirmware, bool, error)
+	CheckAndStartProductFirmwareUpdate(ctx context.Context, device *devices.Device) (*firmware.FlashJob, bool, error)
+	StartDeviceFlash(ctx context.Context, request firmware.FlashRequest) (*firmware.FlashJob, error)
+	ListDeviceFlashJobs(ctx context.Context, deviceID string) ([]firmware.FlashJob, error)
+	GetDeviceFlashJob(ctx context.Context, deviceID string, jobID string) (*firmware.FlashJob, error)
 }
 
 func listProductFirmwaresHandler(firmwareService FirmwareService) http.HandlerFunc {
@@ -39,7 +57,7 @@ func listProductFirmwaresHandler(firmwareService FirmwareService) http.HandlerFu
 
 		firmwares, err := firmwareService.ListProductFirmware(r.Context(), r.PathValue("productIDOrSlug"))
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 
@@ -70,7 +88,7 @@ func uploadProductFirmwareHandler(firmwareService FirmwareService) http.HandlerF
 		upload.ProductID = r.PathValue("productIDOrSlug")
 		firmware, err := firmwareService.UploadProductFirmware(r.Context(), upload)
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 
@@ -91,7 +109,7 @@ func getProductFirmwareHandler(firmwareService FirmwareService) http.HandlerFunc
 			r.PathValue("firmwareID"),
 		)
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 
@@ -122,7 +140,7 @@ func updateProductFirmwareHandler(firmwareService FirmwareService) http.HandlerF
 			update,
 		)
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, firmwareResponse(firmware))
@@ -141,7 +159,7 @@ func deleteProductFirmwareHandler(firmwareService FirmwareService) http.HandlerF
 			r.PathValue("productIDOrSlug"),
 			r.PathValue("firmwareID"),
 		); err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -161,7 +179,7 @@ func releaseProductFirmwareHandler(firmwareService FirmwareService) http.Handler
 			r.PathValue("firmwareID"),
 		)
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, firmwareResponse(firmware))
@@ -181,7 +199,7 @@ func defaultProductFirmwareHandler(firmwareService FirmwareService) http.Handler
 			r.PathValue("firmwareID"),
 		)
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, firmwareResponse(firmware))
@@ -204,7 +222,7 @@ func checkProductFirmwareUpdateHandler(firmwareService FirmwareService) http.Han
 
 		target, updateAvailable, err := firmwareService.CheckProductFirmwareUpdate(r.Context(), request)
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 
@@ -220,7 +238,7 @@ func checkProductFirmwareUpdateHandler(firmwareService FirmwareService) http.Han
 }
 
 func startDeviceFlashHandler(
-	deviceService   DeviceResolver,
+	deviceService DeviceResolver,
 	firmwareService FirmwareService,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -236,11 +254,11 @@ func startDeviceFlashHandler(
 		user := userFromContext(r.Context())
 		device, err := deviceService.Get(r.Context(), user.ID, r.PathValue("deviceIDorName"))
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 		if !device.Connected {
-			writeDeviceError(w, domain.ErrDeviceOffline)
+			writeDeviceError(w, devices.ErrDeviceOffline)
 			return
 		}
 
@@ -252,11 +270,11 @@ func startDeviceFlashHandler(
 
 		job, err := firmwareService.StartDeviceFlash(r.Context(), request)
 		if err != nil {
-			if errors.Is(err, domain.ErrDeviceOffline) || errors.Is(err, domain.ErrDeviceTimeout) {
+			if errors.Is(err, devices.ErrDeviceOffline) || errors.Is(err, devices.ErrDeviceTimeout) {
 				writeDeviceError(w, err)
 				return
 			}
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 
@@ -265,7 +283,7 @@ func startDeviceFlashHandler(
 }
 
 func listDeviceFlashJobsHandler(
-	deviceService   DeviceResolver,
+	deviceService DeviceResolver,
 	firmwareService FirmwareService,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -281,13 +299,13 @@ func listDeviceFlashJobsHandler(
 		user := userFromContext(r.Context())
 		device, err := deviceService.Get(r.Context(), user.ID, r.PathValue("deviceIDorName"))
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 
 		jobs, err := firmwareService.ListDeviceFlashJobs(r.Context(), device.ID)
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 
@@ -300,7 +318,7 @@ func listDeviceFlashJobsHandler(
 }
 
 func getDeviceFlashJobHandler(
-	deviceService   DeviceResolver,
+	deviceService DeviceResolver,
 	firmwareService FirmwareService,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -316,13 +334,13 @@ func getDeviceFlashJobHandler(
 		user := userFromContext(r.Context())
 		device, err := deviceService.Get(r.Context(), user.ID, r.PathValue("deviceIDorName"))
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 
 		job, err := firmwareService.GetDeviceFlashJob(r.Context(), device.ID, r.PathValue("jobID"))
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, flashJobResponse(job))
@@ -330,10 +348,10 @@ func getDeviceFlashJobHandler(
 }
 
 type DeviceResolver interface {
-	Get(ctx context.Context, ownerID string, idOrName string) (*domain.Device, error)
+	Get(ctx context.Context, ownerID string, idOrName string) (*devices.Device, error)
 }
 
-func flashRequestFromHTTP(r *http.Request, device *domain.Device) (firmware.FlashRequest, bool) {
+func flashRequestFromHTTP(r *http.Request, device *devices.Device) (firmware.FlashRequest, bool) {
 	request := firmware.FlashRequest{
 		DeviceID:  device.ID,
 		ProductID: device.ProductID,
@@ -497,8 +515,8 @@ func firmwareUpdateFromRequest(r *http.Request) (firmware.Update, func(), bool) 
 }
 
 func multipartFirmwareUpdateFromRequest(
-	r         *http.Request,
-	update    firmware.Update,
+	r *http.Request,
+	update firmware.Update,
 	hasUpdate bool,
 ) (firmware.Update, func(), bool) {
 	if err := r.ParseMultipartForm(64 << 20); err != nil {
@@ -777,7 +795,7 @@ func updateCheckRequestFromHTTP(r *http.Request) (firmware.UpdateCheckRequest, b
 	return request, true
 }
 
-func flashJobResponse(job *domain.FlashJob) map[string]any {
+func flashJobResponse(job *firmware.FlashJob) map[string]any {
 	return map[string]any{
 		"id":                 job.ID,
 		"device_id":          job.DeviceID,
@@ -801,7 +819,7 @@ func flashJobResponse(job *domain.FlashJob) map[string]any {
 	}
 }
 
-func firmwareResponse(firmware *domain.ProductFirmware) map[string]any {
+func firmwareResponse(firmware *firmware.ProductFirmware) map[string]any {
 	return map[string]any{
 		"id":            firmware.ID,
 		"product_id":    firmware.ProductID,

@@ -12,12 +12,12 @@ import (
 
 // ServeSession decrypts frames, dispatches CoAP packets, and writes encrypted replies.
 func ServeSession(
-	ctx           context.Context,
-	stream        io.ReadWriter,
+	ctx context.Context,
+	stream io.ReadWriter,
 	deviceSession *session.Session,
-	client        *Client,
-	handler       MessageHandler,
-	onPacket      func(deviceID string),
+	client *Client,
+	handler MessageHandler,
+	onPacket func(deviceID string),
 ) error {
 	codec := client.Codec()
 	reader := framing.NewReader(stream, framing.DefaultMaxFrameSize)
@@ -72,7 +72,7 @@ func ServeSession(
 			return err
 		}
 		if afterResponse, ok := handler.(AfterResponseHandler); ok {
-			go afterResponse.AfterResponse(context.Background(), deviceSession, packet)
+			go afterResponse.AfterResponse(ctx, deviceSession, packet)
 		}
 	}
 }

@@ -1,5 +1,5 @@
 // Package test verifies RSA key management and PEM parsing.
-package test
+package keys_test
 
 import (
 	"crypto/rand"

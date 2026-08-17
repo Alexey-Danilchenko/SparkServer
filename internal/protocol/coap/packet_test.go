@@ -1,5 +1,5 @@
 // Package test verifies CoAP packet encoding and decoding.
-package test
+package coap_test
 
 import (
 	"bytes"

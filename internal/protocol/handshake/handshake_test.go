@@ -1,9 +1,8 @@
 // Package test verifies handshake frame parsing and session setup.
-package test
+package handshake_test
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"testing"
 
@@ -86,7 +85,7 @@ func TestHandshakerDecryptsSessionKey(t *testing.T) {
 		t.Fatalf("write frame: %v", err)
 	}
 
-	session, err := handshake.NewHandshaker(keyManager).Handshake(context.Background(), &buffer)
+	session, err := handshake.NewHandshaker(keyManager).Handshake(t.Context(), &buffer)
 	if err != nil {
 		t.Fatalf("handshake: %v", err)
 	}

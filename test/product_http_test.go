@@ -15,12 +15,11 @@ import (
 
 	"sparkserver/internal/auth"
 	"sparkserver/internal/devices"
-	"sparkserver/internal/domain"
 	"sparkserver/internal/events"
 	"sparkserver/internal/firmware"
 	"sparkserver/internal/httpapi"
+	jsonfile "sparkserver/internal/jsonfile"
 	"sparkserver/internal/products"
-	filerepo "sparkserver/internal/repository/file"
 )
 
 func TestProductRoutesCRUD(t *testing.T) {
@@ -219,29 +218,21 @@ func TestProductCompatibilityRoutes(t *testing.T) {
 	defer cancel()
 	streamRequest := httptest.NewRequest(http.MethodGet, "/v1/products/product-1/events/spark/flash", nil).WithContext(ctx)
 	streamRequest.Header.Set("Authorization", "Bearer "+token)
-	streamResponse := httptest.NewRecorder()
+	streamResponse := newSSERecorder()
 	done := make(chan struct{})
 	go func() {
 		handler.ServeHTTP(streamResponse, streamRequest)
 		close(done)
 	}()
-	time.Sleep(25 * time.Millisecond)
+	streamResponse.waitForFlush(t)
 
-	if _, err := eventService.Publish(context.Background(), &domain.Event{Name: "spark/flash/completed", ProductID: "product-1", DeviceID: "device-1"}); err != nil {
+	if _, err := eventService.Publish(context.Background(), &events.Event{Name: "spark/flash/completed", ProductID: "product-1", DeviceID: "device-1"}); err != nil {
 		t.Fatalf("publish product event: %v", err)
 	}
 
-	deadline := time.After(2 * time.Second)
-	for {
-		if strings.Contains(streamResponse.Body.String(), "event: spark/flash/completed") {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("timed out waiting for product event, body = %s", streamResponse.Body.String())
-		default:
-			time.Sleep(10 * time.Millisecond)
-		}
+	streamResponse.waitForFlush(t)
+	if body := streamResponse.BodyString(); !strings.Contains(body, "event: spark/flash/completed") {
+		t.Fatalf("product event body = %s", body)
 	}
 	cancel()
 	select {
@@ -264,24 +255,24 @@ func newAuthenticatedProductHandlerWithEvents(
 
 	dir := t.TempDir()
 	authService := auth.NewService(
-		filerepo.NewUserRepository(filepath.Join(dir, "users")),
-		filerepo.NewAccessTokenRepository(filepath.Join(dir, "tokens")),
+		jsonfile.NewUserRepository(filepath.Join(dir, "users")),
+		jsonfile.NewAccessTokenRepository(filepath.Join(dir, "tokens")),
 		24*time.Hour,
 	)
-	deviceRepository := filerepo.NewDeviceRepository(filepath.Join(dir, "devices"))
+	deviceRepository := jsonfile.NewDeviceRepository(filepath.Join(dir, "devices"))
 	deviceService := devices.NewService(
 		deviceRepository,
-		filerepo.NewDeviceClaimRepository(filepath.Join(dir, "deviceClaims")),
+		jsonfile.NewDeviceClaimRepository(filepath.Join(dir, "deviceClaims")),
 	)
 	firmwareService := firmware.NewService(
-		filerepo.NewProductFirmwareRepository(filepath.Join(dir, "firmware", "metadata")),
+		jsonfile.NewProductFirmwareRepository(filepath.Join(dir, "firmware", "metadata")),
 		filepath.Join(dir, "firmware", "binaries"),
-		filerepo.NewFlashJobRepository(filepath.Join(dir, "firmware", "flashJobs")),
+		jsonfile.NewFlashJobRepository(filepath.Join(dir, "firmware", "flashJobs")),
 	)
-	eventService := events.NewService(filerepo.NewEventRepository(filepath.Join(dir, "events")))
+	eventService := events.NewService(jsonfile.NewEventRepository(filepath.Join(dir, "events")))
 	productService := products.NewService(
-		filerepo.NewProductRepository(filepath.Join(dir, "products")),
-		filerepo.NewProductDeviceRepository(filepath.Join(dir, "products", "devices")),
+		jsonfile.NewProductRepository(filepath.Join(dir, "products")),
+		jsonfile.NewProductDeviceRepository(filepath.Join(dir, "products", "devices")),
 		deviceRepository,
 	)
 
@@ -289,12 +280,11 @@ func newAuthenticatedProductHandlerWithEvents(
 		t.Fatalf("ensure default admin: %v", err)
 	}
 
-	handler := httpapi.NewHandlerWithFirmwareAndProducts(
-		authService,
-		deviceService,
-		eventService,
-		firmwareService,
-		productService,
+	handler := httpapi.NewHandler(
+		httpapi.Dependencies{
+			Auth: authService, Devices: deviceService, Events: eventService,
+			Firmware: firmwareService, Products: productService,
+		},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
 	response := postForm(t, handler, "/oauth/token", "grant_type=password&username=__admin__&password=adminPassword")
@@ -312,11 +302,11 @@ func newAuthenticatedProductHandlerWithEvents(
 }
 
 func assertUnsupportedProductFeature(
-	t       *testing.T,
+	t *testing.T,
 	handler http.Handler,
-	token   string,
-	method  string,
-	path    string,
+	token string,
+	method string,
+	path string,
 ) {
 	t.Helper()
 

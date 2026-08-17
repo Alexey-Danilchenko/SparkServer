@@ -1,5 +1,5 @@
 // Package test verifies legacy-compatible configuration loading.
-package test
+package config_test
 
 import (
 	"os"

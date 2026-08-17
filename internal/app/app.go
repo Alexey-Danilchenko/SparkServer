@@ -4,6 +4,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"path/filepath"
 	"time"
@@ -14,12 +15,12 @@ import (
 	"sparkserver/internal/events"
 	"sparkserver/internal/firmware"
 	"sparkserver/internal/httpapi"
+	jsonfile "sparkserver/internal/jsonfile"
 	"sparkserver/internal/products"
 	protocoldevice "sparkserver/internal/protocol/device"
 	"sparkserver/internal/protocol/handshake"
 	protocolkeys "sparkserver/internal/protocol/keys"
 	"sparkserver/internal/protocol/tcp"
-	filerepo "sparkserver/internal/repository/file"
 	"sparkserver/internal/webhooks"
 )
 
@@ -45,38 +46,47 @@ func New(cfg *config.Config, logger *slog.Logger) *Server {
 	}
 
 	authService := auth.NewService(
-		filerepo.NewUserRepository(cfg.UsersDirectory),
-		filerepo.NewAccessTokenRepository(cfg.TokensDirectory),
+		jsonfile.NewUserRepository(cfg.UsersDirectory),
+		jsonfile.NewAccessTokenRepository(cfg.TokensDirectory),
 		time.Duration(cfg.AccessTokenLifetime)*time.Second,
 	)
 	deviceService := devices.NewService(
-		filerepo.NewDeviceRepository(cfg.DeviceDirectory),
-		filerepo.NewDeviceClaimRepository(cfg.DeviceClaimsDirectory),
+		jsonfile.NewDeviceRepository(cfg.DeviceDirectory),
+		jsonfile.NewDeviceClaimRepository(cfg.DeviceClaimsDirectory),
+		devices.WithAPITimeout(time.Duration(cfg.APITimeout)*time.Millisecond),
 	)
-	deviceService.SetAPITimeout(time.Duration(cfg.APITimeout) * time.Millisecond)
-	eventService := events.NewService(filerepo.NewEventRepository(cfg.EventsDirectory))
-	webhookService := webhooks.NewService(filerepo.NewWebhookRepository(cfg.WebhooksDirectory))
+	eventService := events.NewService(jsonfile.NewEventRepository(cfg.EventsDirectory))
+	webhookService := webhooks.NewService(jsonfile.NewWebhookRepository(cfg.WebhooksDirectory))
 	eventService.AddSink(webhookService)
-	productDeviceRepository := filerepo.NewProductDeviceRepository(filepath.Join(cfg.ProductsDirectory, "devices"))
-	productFirmwareRepository := filerepo.NewProductFirmwareRepository(filepath.Join(cfg.FirmwareDirectory, "metadata"))
+	productDeviceRepository := jsonfile.NewProductDeviceRepository(filepath.Join(cfg.ProductsDirectory, "devices"))
+	productFirmwareRepository := jsonfile.NewProductFirmwareRepository(filepath.Join(cfg.FirmwareDirectory, "metadata"))
 	productService := products.NewService(
-		filerepo.NewProductRepository(cfg.ProductsDirectory),
+		jsonfile.NewProductRepository(cfg.ProductsDirectory),
 		productDeviceRepository,
-		filerepo.NewDeviceRepository(cfg.DeviceDirectory),
+		jsonfile.NewDeviceRepository(cfg.DeviceDirectory),
+		products.WithFirmwareCatalog(productFirmwareRepository),
 	)
-	productService.SetProductFirmwareRepository(productFirmwareRepository)
 	firmwareService := firmware.NewService(
 		productFirmwareRepository,
 		filepath.Join(cfg.FirmwareDirectory, "binaries"),
-		filerepo.NewFlashJobRepository(filepath.Join(cfg.FirmwareDirectory, "flashJobs")),
+		jsonfile.NewFlashJobRepository(filepath.Join(cfg.FirmwareDirectory, "flashJobs")),
+		firmware.WithEventPublisher(eventService),
+		firmware.WithProductDeviceResolver(productDeviceRepository),
 	)
 	keyManager := protocolkeys.NewManager(cfg.ServerKeysDirectory)
 	tcpServer := newTCPServer(cfg.TCP.Address(), deviceService, eventService, firmwareService, logger.With("server", "tcp"))
 	deviceService.SetLiveClient(tcpServer)
 	firmwareService.SetFlashTransport(tcpServer)
-	firmwareService.SetEventPublisher(eventService)
-	firmwareService.SetProductDeviceResolver(productDeviceRepository)
 	tcpServer.SetFlashSignalHandler(firmwareService)
+
+	httpOptions := []httpapi.Option{}
+	if cfg.HTTP.UseSSL {
+		httpOptions = append(httpOptions, httpapi.WithTLS(httpapi.TLSConfig{
+			Enabled:         true,
+			CertificateFile: cfg.HTTP.SSLCertificateFilePath,
+			PrivateKeyFile:  cfg.HTTP.SSLPrivateKeyFilePath,
+		}))
+	}
 
 	return &Server{
 		config:   cfg,
@@ -88,32 +98,42 @@ func New(cfg *config.Config, logger *slog.Logger) *Server {
 		products: productService,
 		webhooks: webhookService,
 		keys:     keyManager,
-		http: httpapi.NewWithDeviceKeys(
+		http: httpapi.New(
 			cfg.HTTP.Address(),
-			authService,
-			deviceService,
-			eventService,
-			firmwareService,
-			productService,
-			webhookService,
-			keyManager,
-			httpapi.TLSConfig{
-				Enabled:         cfg.HTTP.UseSSL,
-				CertificateFile: cfg.HTTP.SSLCertificateFilePath,
-				PrivateKeyFile:  cfg.HTTP.SSLPrivateKeyFilePath,
+			httpapi.Dependencies{
+				Auth:       authService,
+				Devices:    deviceService,
+				Events:     eventService,
+				Firmware:   firmwareService,
+				Products:   productService,
+				Webhooks:   webhookService,
+				DeviceKeys: keyManager,
 			},
 			logger.With("server", "http"),
+			httpOptions...,
 		),
-		tcp:      tcpServer,
+		tcp: tcpServer,
+	}
+}
+
+// Wait blocks until the context ends or either listener reports a terminal failure.
+func (s *Server) Wait(ctx context.Context) error {
+	select {
+	case err := <-s.http.Errors():
+		return fmt.Errorf("http server stopped: %w", err)
+	case err := <-s.tcp.Errors():
+		return fmt.Errorf("tcp server stopped: %w", err)
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
 func newTCPServer(
-	address         string,
-	deviceService   *devices.Service,
-	eventService    *events.Service,
+	address string,
+	deviceService *devices.Service,
+	eventService *events.Service,
 	firmwareService protocoldevice.DeviceFirmwareUpdater,
-	logger          *slog.Logger,
+	logger *slog.Logger,
 ) *tcp.Server {
 	server := tcp.New(address, logger)
 	handler := protocoldevice.NewHandler(eventService, deviceService)
@@ -126,25 +146,25 @@ func newTCPServer(
 // Start prepares storage, keys, default credentials, and both network listeners.
 func (s *Server) Start(ctx context.Context) error {
 	if err := s.config.EnsureDirectories(); err != nil {
-		return err
+		return fmt.Errorf("prepare data directories: %w", err)
 	}
 
 	if err := s.keys.EnsureServerKeyPair(); err != nil {
-		return err
+		return fmt.Errorf("prepare server key pair: %w", err)
 	}
 	s.tcp.SetHandshaker(handshake.NewHandshaker(s.keys))
 
 	if err := s.auth.EnsureDefaultAdmin(ctx, s.config.DefaultAdminUsername, s.config.DefaultAdminPassword); err != nil {
-		return err
+		return fmt.Errorf("prepare default administrator: %w", err)
 	}
 
 	if err := s.http.Start(); err != nil {
-		return err
+		return fmt.Errorf("start HTTP server: %w", err)
 	}
 
 	if err := s.tcp.Start(ctx); err != nil {
 		httpErr := s.http.Shutdown(ctx)
-		return errors.Join(err, httpErr)
+		return errors.Join(fmt.Errorf("start TCP server: %w", err), httpErr)
 	}
 
 	s.logger.Info("spark server started", "http", s.http.ListenerAddress(), "tcp", s.tcp.ListenerAddress())

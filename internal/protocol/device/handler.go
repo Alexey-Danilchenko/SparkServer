@@ -8,8 +8,9 @@ import (
 	"strings"
 	"sync"
 
-	"sparkserver/internal/domain"
+	"sparkserver/internal/devices"
 	"sparkserver/internal/events"
+	"sparkserver/internal/firmware"
 	"sparkserver/internal/protocol/coap"
 	"sparkserver/internal/protocol/particle"
 	"sparkserver/internal/protocol/session"
@@ -17,17 +18,17 @@ import (
 
 // EventPublisher is implemented by events.Service for device event ingestion.
 type EventPublisher interface {
-	Publish(ctx context.Context, event *domain.Event) (*domain.Event, error)
+	Publish(ctx context.Context, event *events.Event) (*events.Event, error)
 }
 
 // DeviceDescriber persists firmware-advertised variables/functions/attributes.
 type DeviceDescriber interface {
-	UpdateDescription(ctx context.Context, deviceID string, description domain.DeviceDescription) (*domain.Device, error)
+	UpdateDescription(ctx context.Context, deviceID string, description devices.Description) (*devices.Device, error)
 }
 
 // DeviceFirmwareUpdater checks product firmware after a describe acknowledgement.
 type DeviceFirmwareUpdater interface {
-	CheckAndStartProductFirmwareUpdate(ctx context.Context, device *domain.Device) (*domain.FlashJob, bool, error)
+	CheckAndStartProductFirmwareUpdate(ctx context.Context, device *devices.Device) (*firmware.FlashJob, bool, error)
 }
 
 // Handler maps device CoAP paths to events, descriptions, pings, and OTA checks.
@@ -35,18 +36,18 @@ type Handler struct {
 	events         EventPublisher
 	devices        DeviceDescriber
 	firmware       DeviceFirmwareUpdater
-	pendingUpdates map[uint16]*domain.Device
+	pendingUpdates map[uint16]*devices.Device
 	mu             sync.Mutex
 }
 
 // NewHandler creates a protocol handler with optional device description persistence.
-func NewHandler(events EventPublisher, devices ...DeviceDescriber) *Handler {
+func NewHandler(events EventPublisher, describers ...DeviceDescriber) *Handler {
 	handler := &Handler{
 		events:         events,
-		pendingUpdates: make(map[uint16]*domain.Device),
+		pendingUpdates: make(map[uint16]*devices.Device),
 	}
-	if len(devices) > 0 {
-		handler.devices = devices[0]
+	if len(describers) > 0 {
+		handler.devices = describers[0]
 	}
 	return handler
 }
@@ -57,8 +58,8 @@ func (handler *Handler) SetFirmwareUpdater(updater DeviceFirmwareUpdater) {
 
 // Handle processes one decrypted device packet and returns an optional response.
 func (handler *Handler) Handle(
-	ctx    context.Context,
-	sess   *session.Session,
+	ctx context.Context,
+	sess *session.Session,
 	packet *coap.Packet,
 ) (*coap.Packet, error) {
 	if packet == nil {
@@ -103,8 +104,8 @@ func (handler *Handler) Handle(
 
 // AfterResponse runs work that should happen only after the device sees the ACK.
 func (handler *Handler) AfterResponse(
-	ctx    context.Context,
-	_      *session.Session,
+	ctx context.Context,
+	_ *session.Session,
 	packet *coap.Packet,
 ) {
 	if handler.firmware == nil || packet == nil {
@@ -121,7 +122,7 @@ func (handler *Handler) AfterResponse(
 	}
 }
 
-func (handler *Handler) queueFirmwareUpdate(messageID uint16, device *domain.Device) {
+func (handler *Handler) queueFirmwareUpdate(messageID uint16, device *devices.Device) {
 	if handler.firmware == nil || device == nil {
 		return
 	}
@@ -169,8 +170,8 @@ func isEventPublish(packet *coap.Packet, path []string) bool {
 	return first == particle.PathEventShort || first == particle.PathEvent || first == particle.PathEvents || first == "publish" || first == "spark"
 }
 
-func eventFromPacket(deviceID string, packet *coap.Packet, path []string) (*domain.Event, bool) {
-	event := domain.Event{DeviceID: deviceID}
+func eventFromPacket(deviceID string, packet *coap.Packet, path []string) (*events.Event, bool) {
+	event := events.Event{DeviceID: deviceID}
 
 	if len(path) > 1 {
 		event.Name = strings.Join(path[1:], "/")
@@ -204,17 +205,17 @@ func eventFromPacket(deviceID string, packet *coap.Packet, path []string) (*doma
 	return &event, true
 }
 
-func descriptionFromPacket(packet *coap.Packet) (domain.DeviceDescription, bool) {
+func descriptionFromPacket(packet *coap.Packet) (devices.Description, bool) {
 	if len(packet.Payload) == 0 {
-		return domain.DeviceDescription{}, false
+		return devices.Description{}, false
 	}
 
 	var body map[string]json.RawMessage
 	if err := json.Unmarshal(packet.Payload, &body); err != nil {
-		return domain.DeviceDescription{}, false
+		return devices.Description{}, false
 	}
 
-	description := domain.DeviceDescription{}
+	description := devices.Description{}
 	if raw := firstRaw(body, "variables", "variable", "vars", "v", "var"); raw != nil {
 		description.Variables = parseVariableMap(raw)
 	}
@@ -227,12 +228,12 @@ func descriptionFromPacket(packet *coap.Packet) (domain.DeviceDescription, bool)
 	mergeTopLevelAttributes(body, &description)
 
 	if len(description.Variables) == 0 && len(description.Functions) == 0 && len(description.Attributes) == 0 {
-		return domain.DeviceDescription{}, false
+		return devices.Description{}, false
 	}
 	return description, true
 }
 
-func decodeEventPayload(payload []byte, event *domain.Event) bool {
+func decodeEventPayload(payload []byte, event *events.Event) bool {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(payload, &raw); err != nil {
 		return false
@@ -363,8 +364,8 @@ func parseStringMap(raw json.RawMessage) map[string]string {
 }
 
 func mergeTopLevelAttributes(
-	body        map[string]json.RawMessage,
-	description *domain.DeviceDescription,
+	body map[string]json.RawMessage,
+	description *devices.Description,
 ) {
 	known := map[string]bool{
 		"variables":  true,

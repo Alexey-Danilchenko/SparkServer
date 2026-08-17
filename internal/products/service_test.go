@@ -1,29 +1,28 @@
 // Package test verifies product service behavior independently of HTTP routing.
-package test
+package products_test
 
 import (
-	"context"
 	"errors"
 	"path/filepath"
 	"testing"
 
-	"sparkserver/internal/domain"
+	"sparkserver/internal/devices"
+	"sparkserver/internal/firmware"
+	jsonfile "sparkserver/internal/jsonfile"
 	"sparkserver/internal/products"
-	"sparkserver/internal/repository"
-	filerepo "sparkserver/internal/repository/file"
 )
 
 func TestProductDeviceDesiredFirmwareVersionRequiresExistingFirmware(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	dir := t.TempDir()
-	deviceRepository := filerepo.NewDeviceRepository(filepath.Join(dir, "devices"))
-	firmwareRepository := filerepo.NewProductFirmwareRepository(filepath.Join(dir, "firmware"))
+	deviceRepository := jsonfile.NewDeviceRepository(filepath.Join(dir, "devices"))
+	firmwareRepository := jsonfile.NewProductFirmwareRepository(filepath.Join(dir, "firmware"))
 	service := products.NewService(
-		filerepo.NewProductRepository(filepath.Join(dir, "products")),
-		filerepo.NewProductDeviceRepository(filepath.Join(dir, "productDevices")),
+		jsonfile.NewProductRepository(filepath.Join(dir, "products")),
+		jsonfile.NewProductDeviceRepository(filepath.Join(dir, "productDevices")),
 		deviceRepository,
+		products.WithFirmwareCatalog(firmwareRepository),
 	)
-	service.SetProductFirmwareRepository(firmwareRepository)
 
 	product, err := service.Create(ctx, products.CreateRequest{
 		OwnerID: "owner-1",
@@ -34,7 +33,7 @@ func TestProductDeviceDesiredFirmwareVersionRequiresExistingFirmware(t *testing.
 	if err != nil {
 		t.Fatalf("create product: %v", err)
 	}
-	if err := deviceRepository.Create(ctx, &domain.Device{
+	if err := deviceRepository.Create(ctx, &devices.Device{
 		ID:      "device-1",
 		OwnerID: "owner-1",
 	}); err != nil {
@@ -43,7 +42,7 @@ func TestProductDeviceDesiredFirmwareVersionRequiresExistingFirmware(t *testing.
 	if _, err := service.AddDevice(ctx, "owner-1", product.ID, "device-1"); err != nil {
 		t.Fatalf("add product device: %v", err)
 	}
-	if err := firmwareRepository.Create(ctx, &domain.ProductFirmware{
+	if err := firmwareRepository.Create(ctx, &firmware.ProductFirmware{
 		ID:        "firmware-2",
 		ProductID: product.ID,
 		Version:   2,
@@ -54,7 +53,7 @@ func TestProductDeviceDesiredFirmwareVersionRequiresExistingFirmware(t *testing.
 	missingVersion := 3
 	if _, err := service.UpdateDevice(ctx, "owner-1", product.ID, "device-1", products.ProductDeviceUpdateRequest{
 		DesiredFirmwareVersion: &missingVersion,
-	}); !errors.Is(err, repository.ErrNotFound) {
+	}); !errors.Is(err, products.ErrNotFound) {
 		t.Fatalf("missing desired firmware err = %v", err)
 	}
 

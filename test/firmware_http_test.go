@@ -21,7 +21,7 @@ import (
 	"sparkserver/internal/devices"
 	"sparkserver/internal/firmware"
 	"sparkserver/internal/httpapi"
-	filerepo "sparkserver/internal/repository/file"
+	jsonfile "sparkserver/internal/jsonfile"
 )
 
 func TestProductFirmwareUploadAndListRoutes(t *testing.T) {
@@ -436,25 +436,27 @@ func newAuthenticatedFirmwareAndDeviceHandler(
 
 	dir := t.TempDir()
 	authService := auth.NewService(
-		filerepo.NewUserRepository(filepath.Join(dir, "users")),
-		filerepo.NewAccessTokenRepository(filepath.Join(dir, "tokens")),
+		jsonfile.NewUserRepository(filepath.Join(dir, "users")),
+		jsonfile.NewAccessTokenRepository(filepath.Join(dir, "tokens")),
 		24*time.Hour,
 	)
 	deviceService := devices.NewService(
-		filerepo.NewDeviceRepository(filepath.Join(dir, "devices")),
-		filerepo.NewDeviceClaimRepository(filepath.Join(dir, "deviceClaims")),
+		jsonfile.NewDeviceRepository(filepath.Join(dir, "devices")),
+		jsonfile.NewDeviceClaimRepository(filepath.Join(dir, "deviceClaims")),
 	)
 	firmwareService := firmware.NewService(
-		filerepo.NewProductFirmwareRepository(filepath.Join(dir, "firmware", "metadata")),
+		jsonfile.NewProductFirmwareRepository(filepath.Join(dir, "firmware", "metadata")),
 		filepath.Join(dir, "firmware", "binaries"),
-		filerepo.NewFlashJobRepository(filepath.Join(dir, "firmware", "flashJobs")),
+		jsonfile.NewFlashJobRepository(filepath.Join(dir, "firmware", "flashJobs")),
 	)
 
 	if err := authService.EnsureDefaultAdmin(context.Background(), "__admin__", "adminPassword"); err != nil {
 		t.Fatalf("ensure default admin: %v", err)
 	}
 
-	handler := httpapi.NewHandlerWithFirmware(authService, deviceService, nil, firmwareService, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	handler := httpapi.NewHandler(httpapi.Dependencies{
+		Auth: authService, Devices: deviceService, Firmware: firmwareService,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	response := postForm(t, handler, "/oauth/token", "grant_type=password&username=__admin__&password=adminPassword")
 	if response.Code != http.StatusOK {
 		t.Fatalf("token status = %d body = %s", response.Code, response.Body.String())

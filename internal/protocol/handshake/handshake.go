@@ -50,7 +50,7 @@ func NewHandshaker(keys KeyManager) *Handshaker {
 
 // Handshake reads one frame, decrypts the session key, and returns a session.
 func (handshaker *Handshaker) Handshake(
-	ctx    context.Context,
+	ctx context.Context,
 	reader io.Reader,
 ) (*session.Session, error) {
 	if err := ctx.Err(); err != nil {

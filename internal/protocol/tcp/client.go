@@ -14,7 +14,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"sparkserver/internal/domain"
+	"sparkserver/internal/devices"
+	"sparkserver/internal/firmware"
 	"sparkserver/internal/protocol/coap"
 	"sparkserver/internal/protocol/framing"
 	"sparkserver/internal/protocol/particle"
@@ -23,9 +24,9 @@ import (
 
 var (
 	// ErrDeviceOffline is returned when no live TCP client exists for a device.
-	ErrDeviceOffline = domain.ErrDeviceOffline
+	ErrDeviceOffline = devices.ErrDeviceOffline
 	// ErrDeviceTimeout is reserved for timed-out live device commands.
-	ErrDeviceTimeout = domain.ErrDeviceTimeout
+	ErrDeviceTimeout = devices.ErrDeviceTimeout
 	// ErrUnexpectedAck reports a device response code that does not match the command.
 	ErrUnexpectedAck = errors.New("unexpected device acknowledgement")
 )
@@ -47,8 +48,8 @@ type Client struct {
 
 // FlashSignalHandler receives device-originated OTA retry/abort signals.
 type FlashSignalHandler interface {
-	RetryMissedFlashChunks(ctx context.Context, deviceID string, chunkIndexes []int) (*domain.FlashJob, error)
-	AbortDeviceFlash(ctx context.Context, deviceID string, message string) (*domain.FlashJob, error)
+	RetryMissedFlashChunks(ctx context.Context, deviceID string, chunkIndexes []int) (*firmware.FlashJob, error)
+	AbortDeviceFlash(ctx context.Context, deviceID string, message string) (*firmware.FlashJob, error)
 }
 
 // NewClient creates an encrypted command client for an established device session.
@@ -88,9 +89,9 @@ func (client *Client) GetVariable(ctx context.Context, variableName string) (str
 }
 
 func (client *Client) CallFunction(
-	ctx          context.Context,
+	ctx context.Context,
 	functionName string,
-	argument     string,
+	argument string,
 ) (int, error) {
 	response, err := client.SendRequest(ctx, coap.Packet{
 		Type: coap.Confirmable,
@@ -124,7 +125,7 @@ func (client *Client) Ping(ctx context.Context) error {
 }
 
 // BeginFlash sends the Particle UpdateBegin payload for an OTA job.
-func (client *Client) BeginFlash(ctx context.Context, job *domain.FlashJob) error {
+func (client *Client) BeginFlash(ctx context.Context, job *firmware.FlashJob) error {
 	payload := updateBeginPayload(job)
 
 	response, err := client.SendRequest(ctx, coap.Packet{
@@ -147,10 +148,10 @@ func (client *Client) BeginFlash(ctx context.Context, job *domain.FlashJob) erro
 
 // SendFlashChunk sends one padded firmware chunk with CRC/query metadata.
 func (client *Client) SendFlashChunk(
-	ctx   context.Context,
-	job   *domain.FlashJob,
-	chunk domain.OTAChunk,
-	data  []byte,
+	ctx context.Context,
+	job *firmware.FlashJob,
+	chunk firmware.OTAChunk,
+	data []byte,
 ) error {
 	payload := particleChunkPayload(job, data)
 	checksum := crc32.ChecksumIEEE(payload)
@@ -170,7 +171,7 @@ func (client *Client) SendFlashChunk(
 	return fmt.Errorf("%w: code %d", ErrUnexpectedAck, response.Code)
 }
 
-func (client *Client) CompleteFlash(ctx context.Context, _ *domain.FlashJob) error {
+func (client *Client) CompleteFlash(ctx context.Context, _ *firmware.FlashJob) error {
 	return client.SendMessage(ctx, coap.Packet{
 		Type:    coap.Confirmable,
 		Code:    coap.CodePut,
@@ -259,7 +260,7 @@ func (client *Client) HandlePacket(packet *coap.Packet) bool {
 }
 
 func (client *Client) HandlePacketWithContext(
-	ctx    context.Context,
+	ctx context.Context,
 	packet *coap.Packet,
 ) (bool, error) {
 	if packet == nil || !isResponsePacket(packet) {
@@ -342,7 +343,7 @@ func (client *Client) handleOTAControl(ctx context.Context, packet *coap.Packet)
 		indexes := missedChunkIndexes(packet.Payload)
 		if client.flashSignals != nil && len(indexes) > 0 {
 			go func() {
-				_, _ = client.flashSignals.RetryMissedFlashChunks(context.Background(), client.deviceID, indexes)
+				_, _ = client.flashSignals.RetryMissedFlashChunks(ctx, client.deviceID, indexes)
 			}()
 		}
 		return true, nil
@@ -354,7 +355,7 @@ func (client *Client) handleOTAControl(ctx context.Context, packet *coap.Packet)
 			message = "device aborted flash"
 		}
 		go func() {
-			_, _ = client.flashSignals.AbortDeviceFlash(context.Background(), client.deviceID, message)
+			_, _ = client.flashSignals.AbortDeviceFlash(ctx, client.deviceID, message)
 		}()
 		return true, nil
 	}
@@ -362,7 +363,7 @@ func (client *Client) handleOTAControl(ctx context.Context, packet *coap.Packet)
 	return false, nil
 }
 
-func updateBeginPayload(job *domain.FlashJob) []byte {
+func updateBeginPayload(job *firmware.FlashJob) []byte {
 	chunkSize := job.ChunkSize
 	if chunkSize <= 0 {
 		chunkSize = 512
@@ -377,7 +378,7 @@ func updateBeginPayload(job *domain.FlashJob) []byte {
 	return payload
 }
 
-func particleChunkPayload(job *domain.FlashJob, data []byte) []byte {
+func particleChunkPayload(job *firmware.FlashJob, data []byte) []byte {
 	chunkSize := job.ChunkSize
 	if chunkSize <= 0 || len(data) >= chunkSize {
 		return append([]byte(nil), data...)

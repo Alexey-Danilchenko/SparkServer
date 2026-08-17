@@ -8,9 +8,25 @@ import (
 	"net/http"
 	"strings"
 
-	"sparkserver/internal/domain"
+	"sparkserver/internal/auth"
 	"sparkserver/internal/events"
 )
+
+func registerEventRoutes(
+	router *http.ServeMux,
+	authService *auth.Service,
+	eventService *events.Service,
+	productService ProductService,
+) {
+	router.Handle("GET /v1/events", requireAuth(authService, http.HandlerFunc(streamEventsHandler(eventService, events.Filter{}))))
+	router.Handle("GET /v1/events/{prefix...}", requireAuth(authService, http.HandlerFunc(streamEventsFromPathHandler(eventService, ""))))
+	router.Handle("GET /v1/devices/events", requireAuth(authService, http.HandlerFunc(streamEventsHandler(eventService, events.Filter{}))))
+	router.Handle("GET /v1/devices/{deviceIDorName}/events", requireAuth(authService, http.HandlerFunc(streamDeviceEventsHandler(eventService))))
+	router.Handle("GET /v1/devices/{deviceIDorName}/events/{prefix...}", requireAuth(authService, http.HandlerFunc(streamDeviceEventsHandler(eventService))))
+	router.Handle("POST /v1/devices/events", requireAuth(authService, http.HandlerFunc(publishEventHandler(eventService))))
+	router.Handle("GET /v1/products/{productIDOrSlug}/events", requireAuth(authService, http.HandlerFunc(streamProductEventsHandler(eventService, productService))))
+	router.Handle("GET /v1/products/{productIDOrSlug}/events/{prefix...}", requireAuth(authService, http.HandlerFunc(streamProductEventsHandler(eventService, productService))))
+}
 
 func pingHandler(w http.ResponseWriter, r *http.Request) {
 	payload := map[string]any{}
@@ -31,7 +47,7 @@ func streamEventsFromPathHandler(eventService *events.Service, deviceID string) 
 }
 
 func streamProductEventsHandler(
-	eventService   *events.Service,
+	eventService *events.Service,
 	productService ProductService,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -42,7 +58,7 @@ func streamProductEventsHandler(
 
 		product, err := productService.Get(r.Context(), userFromContext(r.Context()).ID, r.PathValue("productIDOrSlug"))
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 		streamEvents(w, r, eventService, events.Filter{
@@ -68,10 +84,10 @@ func streamEventsHandler(eventService *events.Service, filter events.Filter) htt
 }
 
 func streamEvents(
-	w            http.ResponseWriter,
-	r            *http.Request,
+	w http.ResponseWriter,
+	r *http.Request,
 	eventService *events.Service,
-	filter       events.Filter,
+	filter events.Filter,
 ) {
 	if eventService == nil {
 		writeError(w, http.StatusServiceUnavailable, "events_unavailable")
@@ -83,6 +99,7 @@ func streamEvents(
 		writeError(w, http.StatusInternalServerError, "streaming_unavailable")
 		return
 	}
+	events := eventService.Subscribe(r.Context(), filter)
 
 	// Particle clients expect a long-lived server-sent event stream.
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -91,7 +108,6 @@ func streamEvents(
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
-	events := eventService.Subscribe(r.Context(), filter)
 	for {
 		select {
 		case <-r.Context().Done():
@@ -123,7 +139,7 @@ func publishEventHandler(eventService *events.Service) http.HandlerFunc {
 
 		published, err := eventService.Publish(r.Context(), event)
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 
@@ -136,7 +152,7 @@ func publishEventHandler(eventService *events.Service) http.HandlerFunc {
 	}
 }
 
-func eventFromRequest(r *http.Request) (*domain.Event, bool) {
+func eventFromRequest(r *http.Request) (*events.Event, bool) {
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		var body struct {
 			Name     string `json:"name"`
@@ -157,7 +173,7 @@ func eventFromRequest(r *http.Request) (*domain.Event, bool) {
 		if deviceID == "" {
 			deviceID = body.CoreID
 		}
-		return &domain.Event{Name: name, Data: body.Data, DeviceID: deviceID}, name != ""
+		return &events.Event{Name: name, Data: body.Data, DeviceID: deviceID}, name != ""
 	}
 
 	if err := r.ParseForm(); err != nil {
@@ -173,10 +189,10 @@ func eventFromRequest(r *http.Request) (*domain.Event, bool) {
 		deviceID = r.Form.Get("coreid")
 	}
 
-	return &domain.Event{Name: name, Data: r.Form.Get("data"), DeviceID: deviceID}, name != ""
+	return &events.Event{Name: name, Data: r.Form.Get("data"), DeviceID: deviceID}, name != ""
 }
 
-func writeSSE(w http.ResponseWriter, event domain.Event) error {
+func writeSSE(w http.ResponseWriter, event events.Event) error {
 	payload := map[string]any{
 		"name":         event.Name,
 		"data":         event.Data,

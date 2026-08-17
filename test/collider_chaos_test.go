@@ -18,11 +18,11 @@ import (
 	"sparkserver/internal/devices"
 	"sparkserver/internal/events"
 	"sparkserver/internal/httpapi"
+	jsonfile "sparkserver/internal/jsonfile"
 	"sparkserver/internal/protocol/coap"
 	protocoldevice "sparkserver/internal/protocol/device"
 	protocolkeys "sparkserver/internal/protocol/keys"
 	"sparkserver/internal/protocol/tcp"
-	filerepo "sparkserver/internal/repository/file"
 	"sparkserver/internal/webhooks"
 )
 
@@ -48,8 +48,8 @@ func TestColliderChaosMonkeyThrashesVirtualDevices(t *testing.T) {
 	}
 
 	authService := auth.NewService(
-		filerepo.NewUserRepository(filepath.Join(dir, "users")),
-		filerepo.NewAccessTokenRepository(filepath.Join(dir, "tokens")),
+		jsonfile.NewUserRepository(filepath.Join(dir, "users")),
+		jsonfile.NewAccessTokenRepository(filepath.Join(dir, "tokens")),
 		24*time.Hour,
 	)
 	if _, err := authService.CreateUser(ctx, "__test__@testaccount.com", "password"); err != nil {
@@ -57,12 +57,12 @@ func TestColliderChaosMonkeyThrashesVirtualDevices(t *testing.T) {
 	}
 
 	deviceService := devices.NewService(
-		filerepo.NewDeviceRepository(filepath.Join(dir, "devices")),
-		filerepo.NewDeviceClaimRepository(filepath.Join(dir, "deviceClaims")),
+		jsonfile.NewDeviceRepository(filepath.Join(dir, "devices")),
+		jsonfile.NewDeviceClaimRepository(filepath.Join(dir, "deviceClaims")),
+		devices.WithAPITimeout(2*time.Second),
 	)
-	deviceService.SetAPITimeout(2 * time.Second)
-	eventService := events.NewService(filerepo.NewEventRepository(filepath.Join(dir, "events")))
-	webhookService := webhooks.NewService(filerepo.NewWebhookRepository(filepath.Join(dir, "webhooks")))
+	eventService := events.NewService(jsonfile.NewEventRepository(filepath.Join(dir, "events")))
+	webhookService := webhooks.NewService(jsonfile.NewWebhookRepository(filepath.Join(dir, "webhooks")))
 	eventService.AddSink(webhookService)
 
 	protocolHandler := protocoldevice.NewHandler(eventService, deviceService)
@@ -70,14 +70,11 @@ func TestColliderChaosMonkeyThrashesVirtualDevices(t *testing.T) {
 	tcpServer.SetDeviceStatusUpdater(deviceService)
 	deviceService.SetLiveClient(tcpServer)
 
-	httpHandler := httpapi.NewHandlerWithDeviceKeys(
-		authService,
-		deviceService,
-		eventService,
-		nil,
-		nil,
-		webhookService,
-		keyManager,
+	httpHandler := httpapi.NewHandler(
+		httpapi.Dependencies{
+			Auth: authService, Devices: deviceService, Events: eventService,
+			Webhooks: webhookService, DeviceKeys: keyManager,
+		},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
 	token := loginColliderUser(t, httpHandler)

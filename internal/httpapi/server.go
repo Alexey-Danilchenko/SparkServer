@@ -16,10 +16,8 @@ import (
 
 	"sparkserver/internal/auth"
 	"sparkserver/internal/devices"
-	"sparkserver/internal/domain"
 	"sparkserver/internal/events"
 	"sparkserver/internal/netutil"
-	"sparkserver/internal/repository"
 )
 
 // DeviceKeyRegistrar stores public keys submitted by Particle device provisioning.
@@ -34,6 +32,7 @@ type Server struct {
 	logger          *slog.Logger
 	server          *http.Server
 	tls             TLSConfig
+	runtimeErrors   chan error
 }
 
 // TLSConfig controls HTTPS for the HTTP API listener.
@@ -43,141 +42,93 @@ type TLSConfig struct {
 	PrivateKeyFile  string
 }
 
-// New builds an HTTP server with the core auth/device/event API surface.
-func New(
-	address string,
-	authService *auth.Service,
-	deviceService *devices.Service,
-	eventService *events.Service,
-	logger *slog.Logger,
-) *Server {
-	return NewWithFirmware(address, authService, deviceService, eventService, nil, logger)
+// Dependencies contains the services used by the HTTP API route tree.
+type Dependencies struct {
+	Auth       *auth.Service
+	Devices    *devices.Service
+	Events     *events.Service
+	Firmware   FirmwareService
+	Products   ProductService
+	Webhooks   WebhookService
+	DeviceKeys DeviceKeyRegistrar
 }
 
-func NewWithFirmware(
-	address string,
-	authService *auth.Service,
-	deviceService *devices.Service,
-	eventService *events.Service,
-	firmwareService FirmwareService,
-	logger *slog.Logger,
-) *Server {
-	return NewWithFirmwareAndProducts(address, authService, deviceService, eventService, firmwareService, nil, logger)
+// Timeouts controls request intake and keep-alive behavior. WriteTimeout is
+// intentionally omitted because the API serves long-lived SSE responses.
+type Timeouts struct {
+	ReadHeader time.Duration
+	Read       time.Duration
+	Idle       time.Duration
 }
 
-func NewWithFirmwareAndProducts(
-	address string,
-	authService *auth.Service,
-	deviceService *devices.Service,
-	eventService *events.Service,
-	firmwareService FirmwareService,
-	productService ProductService,
-	logger *slog.Logger,
-) *Server {
-	return NewWithServices(address, authService, deviceService, eventService, firmwareService, productService, nil, logger)
+// Option configures optional HTTP server behavior.
+type Option func(*Server)
+
+// WithTLS enables HTTPS with the supplied certificate configuration.
+func WithTLS(config TLSConfig) Option {
+	return func(server *Server) {
+		server.tls = config
+	}
 }
 
-func NewWithServices(
-	address string,
-	authService *auth.Service,
-	deviceService *devices.Service,
-	eventService *events.Service,
-	firmwareService FirmwareService,
-	productService ProductService,
-	webhookService WebhookService,
-	logger *slog.Logger,
-) *Server {
-	return NewWithDeviceKeys(address, authService, deviceService, eventService, firmwareService, productService, webhookService, nil, TLSConfig{}, logger)
+// WithTimeouts overrides the production-safe HTTP timeout defaults.
+func WithTimeouts(timeouts Timeouts) Option {
+	return func(server *Server) {
+		server.server.ReadHeaderTimeout = timeouts.ReadHeader
+		server.server.ReadTimeout = timeouts.Read
+		server.server.IdleTimeout = timeouts.Idle
+	}
 }
 
-// NewWithDeviceKeys builds the full file-backed HTTP API including provisioning keys.
-func NewWithDeviceKeys(
-	address string,
-	authService *auth.Service,
-	deviceService *devices.Service,
-	eventService *events.Service,
-	firmwareService FirmwareService,
-	productService ProductService,
-	webhookService WebhookService,
-	keyRegistrar DeviceKeyRegistrar,
-	tlsConfig TLSConfig,
-	logger *slog.Logger,
-) *Server {
+// New builds the HTTP API with explicit dependencies and optional transport settings.
+func New(address string, dependencies Dependencies, logger *slog.Logger, options ...Option) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
 
-	return &Server{
-		address: address,
-		logger:  logger,
-		tls:     tlsConfig,
+	server := &Server{
+		address:       address,
+		logger:        logger,
+		runtimeErrors: make(chan error, 1),
 		server: &http.Server{
 			Addr:              address,
-			Handler:           NewHandlerWithDeviceKeys(authService, deviceService, eventService, firmwareService, productService, webhookService, keyRegistrar, logger),
+			Handler:           NewHandler(dependencies, logger),
 			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       15 * time.Second,
+			IdleTimeout:       120 * time.Second,
 		},
 	}
+	for _, option := range options {
+		option(server)
+	}
+	return server
 }
 
-func NewHandler(
-	authService *auth.Service,
-	deviceService *devices.Service,
-	eventService *events.Service,
-	logger *slog.Logger,
-) http.Handler {
-	return NewHandlerWithFirmware(authService, deviceService, eventService, nil, logger)
-}
-
-func NewHandlerWithFirmware(
-	authService *auth.Service,
-	deviceService *devices.Service,
-	eventService *events.Service,
-	firmwareService FirmwareService,
-	logger *slog.Logger,
-) http.Handler {
-	return NewHandlerWithFirmwareAndProducts(authService, deviceService, eventService, firmwareService, nil, logger)
-}
-
-func NewHandlerWithFirmwareAndProducts(
-	authService *auth.Service,
-	deviceService *devices.Service,
-	eventService *events.Service,
-	firmwareService FirmwareService,
-	productService ProductService,
-	logger *slog.Logger,
-) http.Handler {
-	return NewHandlerWithServices(authService, deviceService, eventService, firmwareService, productService, nil, logger)
-}
-
-func NewHandlerWithServices(
-	authService *auth.Service,
-	deviceService *devices.Service,
-	eventService *events.Service,
-	firmwareService FirmwareService,
-	productService ProductService,
-	webhookService WebhookService,
-	logger *slog.Logger,
-) http.Handler {
-	return NewHandlerWithDeviceKeys(authService, deviceService, eventService, firmwareService, productService, webhookService, nil, logger)
-}
-
-// NewHandlerWithDeviceKeys registers the compatibility routes onto a ServeMux.
-func NewHandlerWithDeviceKeys(
-	authService *auth.Service,
-	deviceService *devices.Service,
-	eventService *events.Service,
-	firmwareService FirmwareService,
-	productService ProductService,
-	webhookService WebhookService,
-	keyRegistrar DeviceKeyRegistrar,
-	logger *slog.Logger,
-) http.Handler {
+// NewHandler registers the compatibility routes onto a ServeMux.
+func NewHandler(dependencies Dependencies, logger *slog.Logger) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	authService := dependencies.Auth
+	deviceService := dependencies.Devices
+	eventService := dependencies.Events
+	firmwareService := dependencies.Firmware
+	productService := dependencies.Products
+	webhookService := dependencies.Webhooks
+	keyRegistrar := dependencies.DeviceKeys
 
 	router := http.NewServeMux()
-	// Keep route registration explicit so COMPATIBILITY.md can be checked against it.
+	registerCoreRoutes(router, authService)
+	registerDeviceRoutes(router, authService, deviceService, firmwareService, keyRegistrar)
+	registerEventRoutes(router, authService, eventService, productService)
+	registerFirmwareRoutes(router, authService, firmwareService)
+	registerProductRoutes(router, authService, productService, firmwareService)
+	registerWebhookRoutes(router, authService, webhookService)
+
+	return requestLogger(logger, router)
+}
+
+func registerCoreRoutes(router *http.ServeMux, authService *auth.Service) {
 	router.HandleFunc("GET /health", healthHandler)
 	router.HandleFunc("GET /{$}", rootHandler)
 	router.HandleFunc("POST /oauth/token", tokenHandler(authService))
@@ -185,72 +136,18 @@ func NewHandlerWithDeviceKeys(
 	router.HandleFunc("POST /v1/users", createUserHandler(authService))
 	router.Handle("GET /v1/access_tokens", requireAuth(authService, http.HandlerFunc(listTokensHandler(authService))))
 	router.Handle("DELETE /v1/access_tokens/{token}", requireAuth(authService, http.HandlerFunc(deleteTokenHandler(authService))))
-	router.Handle("POST /v1/device_claims", requireAuth(authService, http.HandlerFunc(createDeviceClaimHandler(deviceService))))
-	router.HandleFunc("POST /v1/provisioning/{deviceID}", provisionDeviceHandler(authService, deviceService, keyRegistrar))
-	router.Handle("POST /v1/devices", requireAuth(authService, http.HandlerFunc(claimDeviceHandler(deviceService))))
-	router.Handle("GET /v1/devices", requireAuth(authService, http.HandlerFunc(listDevicesHandler(deviceService))))
-	router.Handle("GET /v1/devices/{deviceIDorName}", requireAuth(authService, http.HandlerFunc(getDeviceHandler(deviceService))))
-	router.Handle("GET /v1/devices/{deviceIDorName}/flash", requireAuth(authService, http.HandlerFunc(listDeviceFlashJobsHandler(deviceService, firmwareService))))
-	router.Handle("POST /v1/devices/{deviceIDorName}/flash", requireAuth(authService, http.HandlerFunc(startDeviceFlashHandler(deviceService, firmwareService))))
-	router.Handle("GET /v1/devices/{deviceIDorName}/flash/{jobID}", requireAuth(authService, http.HandlerFunc(getDeviceFlashJobHandler(deviceService, firmwareService))))
-	router.Handle("GET /v1/devices/{deviceIDorName}/{varName}", requireAuth(authService, http.HandlerFunc(getDeviceVariableHandler(deviceService))))
-	router.Handle("POST /v1/devices/{deviceIDorName}/{functionName}", requireAuth(authService, http.HandlerFunc(callDeviceFunctionHandler(deviceService))))
-	router.Handle("PUT /v1/devices/{deviceIDorName}", requireAuth(authService, http.HandlerFunc(updateDeviceHandler(deviceService, firmwareService))))
-	router.Handle("DELETE /v1/devices/{deviceIDorName}", requireAuth(authService, http.HandlerFunc(deleteDeviceHandler(deviceService))))
-	router.Handle("PUT /v1/devices/{deviceIDorName}/ping", requireAuth(authService, http.HandlerFunc(pingDeviceHandler(deviceService))))
-	router.Handle("GET /v1/events", requireAuth(authService, http.HandlerFunc(streamEventsHandler(eventService, events.Filter{}))))
-	router.Handle("GET /v1/events/{prefix...}", requireAuth(authService, http.HandlerFunc(streamEventsFromPathHandler(eventService, ""))))
-	router.Handle("GET /v1/devices/events", requireAuth(authService, http.HandlerFunc(streamEventsHandler(eventService, events.Filter{}))))
-	router.Handle("GET /v1/devices/{deviceIDorName}/events", requireAuth(authService, http.HandlerFunc(streamDeviceEventsHandler(eventService))))
-	router.Handle("GET /v1/devices/{deviceIDorName}/events/{prefix...}", requireAuth(authService, http.HandlerFunc(streamDeviceEventsHandler(eventService))))
-	router.Handle("POST /v1/devices/events", requireAuth(authService, http.HandlerFunc(publishEventHandler(eventService))))
-	router.Handle("GET /v1/products/{productIDOrSlug}/firmware", requireAuth(authService, http.HandlerFunc(listProductFirmwaresHandler(firmwareService))))
-	router.Handle("POST /v1/products/{productIDOrSlug}/firmware", requireAuth(authService, http.HandlerFunc(uploadProductFirmwareHandler(firmwareService))))
-	router.Handle("GET /v1/products/{productIDOrSlug}/firmware/check", requireAuth(authService, http.HandlerFunc(checkProductFirmwareUpdateHandler(firmwareService))))
-	router.Handle("GET /v1/products/{productIDOrSlug}/firmware/{firmwareID}", requireAuth(authService, http.HandlerFunc(getProductFirmwareHandler(firmwareService))))
-	router.Handle("PUT /v1/products/{productIDOrSlug}/firmware/{firmwareID}", requireAuth(authService, http.HandlerFunc(updateProductFirmwareHandler(firmwareService))))
-	router.Handle("DELETE /v1/products/{productIDOrSlug}/firmware/{firmwareID}", requireAuth(authService, http.HandlerFunc(deleteProductFirmwareHandler(firmwareService))))
-	router.Handle("PUT /v1/products/{productIDOrSlug}/firmware/{firmwareID}/release", requireAuth(authService, http.HandlerFunc(releaseProductFirmwareHandler(firmwareService))))
-	router.Handle("POST /v1/products/{productIDOrSlug}/firmware/{firmwareID}/release", requireAuth(authService, http.HandlerFunc(releaseProductFirmwareHandler(firmwareService))))
-	router.Handle("PUT /v1/products/{productIDOrSlug}/firmware/{firmwareID}/default", requireAuth(authService, http.HandlerFunc(defaultProductFirmwareHandler(firmwareService))))
-	router.Handle("POST /v1/products/{productIDOrSlug}/firmware/{firmwareID}/default", requireAuth(authService, http.HandlerFunc(defaultProductFirmwareHandler(firmwareService))))
-	router.Handle("GET /v1/products", requireAuth(authService, http.HandlerFunc(listProductsHandler(productService))))
-	router.Handle("POST /v1/products", requireAuth(authService, http.HandlerFunc(createProductHandler(productService))))
-	router.Handle("GET /v1/products/{productIDOrSlug}/config", requireAuth(authService, http.HandlerFunc(getProductConfigHandler(productService))))
-	router.Handle("GET /v1/products/{productIDOrSlug}/events", requireAuth(authService, http.HandlerFunc(streamProductEventsHandler(eventService, productService))))
-	router.Handle("GET /v1/products/{productIDOrSlug}/events/{prefix...}", requireAuth(authService, http.HandlerFunc(streamProductEventsHandler(eventService, productService))))
-	router.Handle("DELETE /v1/products/{productIDOrSlug}/team/{username}", requireAuth(authService, http.HandlerFunc(unsupportedProductFeatureHandler("not_supported"))))
-	router.Handle("POST /v1/products/{productIDOrSlug}/clients", requireAuth(authService, http.HandlerFunc(unsupportedProductFeatureHandler("not_supported"))))
-	router.Handle("POST /v1/products/{productIDOrSlug}/clients/", requireAuth(authService, http.HandlerFunc(unsupportedProductFeatureHandler("not_supported"))))
-	router.Handle("PUT /v1/products/{productIDOrSlug}/clients/{clientID}", requireAuth(authService, http.HandlerFunc(unsupportedProductFeatureHandler("not_supported"))))
-	router.Handle("DELETE /v1/products/{productIDOrSlug}/clients/{clientID}", requireAuth(authService, http.HandlerFunc(unsupportedProductFeatureHandler("not_supported"))))
-	router.Handle("GET /v1/products/{productIDOrSlug}", requireAuth(authService, http.HandlerFunc(getProductHandler(productService))))
-	router.Handle("PUT /v1/products/{productIDOrSlug}", requireAuth(authService, http.HandlerFunc(updateProductHandler(productService))))
-	router.Handle("DELETE /v1/products/{productIDOrSlug}", requireAuth(authService, http.HandlerFunc(deleteProductHandler(productService))))
-	router.Handle("GET /v1/products/{productIDOrSlug}/devices", requireAuth(authService, http.HandlerFunc(listProductDevicesHandler(productService))))
-	router.Handle("POST /v1/products/{productIDOrSlug}/devices", requireAuth(authService, http.HandlerFunc(addProductDeviceHandler(productService))))
-	router.Handle("GET /v1/products/{productIDOrSlug}/devices/{deviceID}", requireAuth(authService, http.HandlerFunc(getProductDeviceHandler(productService))))
-	router.Handle("PUT /v1/products/{productIDOrSlug}/devices/{deviceID}", requireAuth(authService, http.HandlerFunc(updateProductDeviceHandler(productService, firmwareService))))
-	router.Handle("DELETE /v1/products/{productIDOrSlug}/devices/{deviceID}", requireAuth(authService, http.HandlerFunc(removeProductDeviceHandler(productService))))
-	router.Handle("GET /v1/webhooks", requireAuth(authService, http.HandlerFunc(listWebhooksHandler(webhookService))))
-	router.Handle("POST /v1/webhooks", requireAuth(authService, http.HandlerFunc(createWebhookHandler(webhookService))))
-	router.Handle("GET /v1/webhooks/{webhookID}", requireAuth(authService, http.HandlerFunc(getWebhookHandler(webhookService))))
-	router.Handle("PUT /v1/webhooks/{webhookID}", requireAuth(authService, http.HandlerFunc(updateWebhookHandler(webhookService))))
-	router.Handle("DELETE /v1/webhooks/{webhookID}", requireAuth(authService, http.HandlerFunc(deleteWebhookHandler(webhookService))))
-
-	return requestLogger(logger, router)
 }
 
 func (s *Server) Start() error {
 	listener, err := net.Listen("tcp", s.address)
 	if err != nil {
-		return err
+		return fmt.Errorf("listen for HTTP API on %s: %w", s.address, err)
 	}
 
 	serverListener, err := s.serverListener(listener)
 	if err != nil {
 		_ = listener.Close()
-		return err
+		return fmt.Errorf("configure HTTP API listener: %w", err)
 	}
 
 	listenerAddress := netutil.AdvertisedAddress(listener.Addr())
@@ -263,15 +160,16 @@ func (s *Server) Start() error {
 	s.logger.Info(message, "address", listenerAddress)
 	go func() {
 		if err := s.server.Serve(serverListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			message = "http listener stopped"
-			if s.tls.Enabled {
-				message = "https listener stopped"
-			}
-			s.logger.Error(message, "error", err)
+			s.runtimeErrors <- fmt.Errorf("serve HTTP API: %w", err)
 		}
 	}()
 
 	return nil
+}
+
+// Errors reports terminal runtime failures from the HTTP listener.
+func (s *Server) Errors() <-chan error {
+	return s.runtimeErrors
 }
 
 func (s *Server) serverListener(listener net.Listener) (net.Listener, error) {
@@ -341,7 +239,7 @@ func tokenHandler(authService *auth.Service) http.HandlerFunc {
 
 		token, err := authService.Login(r.Context(), username, password)
 		if err != nil {
-			if errors.Is(err, auth.ErrInvalidCredentials) || errors.Is(err, repository.ErrNotFound) {
+			if errors.Is(err, auth.ErrInvalidCredentials) || errors.Is(err, auth.ErrNotFound) {
 				writeError(w, http.StatusUnauthorized, "invalid_grant")
 				return
 			}
@@ -372,7 +270,7 @@ func createUserHandler(authService *auth.Service) http.HandlerFunc {
 
 		user, err := authService.CreateUser(r.Context(), username, password)
 		if err != nil {
-			if errors.Is(err, repository.ErrConflict) {
+			if errors.Is(err, auth.ErrConflict) {
 				writeError(w, http.StatusConflict, "user_exists")
 				return
 			}
@@ -417,7 +315,7 @@ func deleteTokenHandler(authService *auth.Service) http.HandlerFunc {
 			return
 		}
 
-		if err := authService.DeleteToken(r.Context(), tokenValue); err != nil && !errors.Is(err, repository.ErrNotFound) {
+		if err := authService.DeleteToken(r.Context(), tokenValue); err != nil && !errors.Is(err, auth.ErrNotFound) {
 			writeError(w, http.StatusInternalServerError, "server_error")
 			return
 		}
@@ -482,21 +380,21 @@ func requireAuth(authService *auth.Service, next http.Handler) http.Handler {
 	})
 }
 
-func authenticateRequest(authService *auth.Service, r *http.Request) (*domain.User, error) {
+func authenticateRequest(authService *auth.Service, r *http.Request) (*auth.User, error) {
 	header := r.Header.Get("Authorization")
 	tokenValue, ok := strings.CutPrefix(header, "Bearer ")
 	if !ok {
 		tokenValue, ok = strings.CutPrefix(header, "bearer ")
 	}
 	if !ok || tokenValue == "" {
-		return nil, repository.ErrNotFound
+		return nil, auth.ErrNotFound
 	}
 
 	user, _, err := authService.AuthenticateToken(r.Context(), tokenValue)
 	return user, err
 }
 
-func userFromContext(ctx context.Context) *domain.User {
-	user, _ := ctx.Value(userContextKey).(*domain.User)
+func userFromContext(ctx context.Context) *auth.User {
+	user, _ := ctx.Value(userContextKey).(*auth.User)
 	return user
 }

@@ -4,6 +4,7 @@ package tcp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -44,11 +45,15 @@ type Server struct {
 	logger          *slog.Logger
 	listener        net.Listener
 	done            chan struct{}
+	runtimeErrors   chan error
 	registry        *Registry
 	deviceStatus    DeviceStatusUpdater
 	handshaker      Handshaker
 	handler         MessageHandler
 	flashSignals    FlashSignalHandler
+	connections     map[net.Conn]struct{}
+	connectionWG    sync.WaitGroup
+	stopping        bool
 	mu              sync.Mutex
 }
 
@@ -59,10 +64,12 @@ func New(address string, logger *slog.Logger) *Server {
 	}
 
 	return &Server{
-		address:  address,
-		logger:   logger,
-		done:     make(chan struct{}),
-		registry: NewRegistry(),
+		address:       address,
+		logger:        logger,
+		done:          make(chan struct{}),
+		runtimeErrors: make(chan error, 1),
+		registry:      NewRegistry(),
+		connections:   make(map[net.Conn]struct{}),
 	}
 }
 
@@ -107,7 +114,7 @@ func (s *Server) RegisterDevice(ctx context.Context, deviceID string, conn net.C
 
 	if deviceStatus != nil {
 		if err := deviceStatus.MarkConnected(ctx, deviceID); err != nil {
-			s.logger.Error("mark device connected", "device_id", deviceID, "error", err)
+			s.logger.Error("mark device connected", "device_id", deviceID, "err", err)
 		}
 	}
 
@@ -115,8 +122,8 @@ func (s *Server) RegisterDevice(ctx context.Context, deviceID string, conn net.C
 		s.registry.Unregister(deviceID)
 
 		if deviceStatus != nil {
-			if err := deviceStatus.MarkDisconnected(context.Background(), deviceID); err != nil {
-				s.logger.Error("mark device disconnected", "device_id", deviceID, "error", err)
+			if err := deviceStatus.MarkDisconnected(context.WithoutCancel(ctx), deviceID); err != nil {
+				s.logger.Error("mark device disconnected", "device_id", deviceID, "err", err)
 			}
 		}
 	}
@@ -124,10 +131,10 @@ func (s *Server) RegisterDevice(ctx context.Context, deviceID string, conn net.C
 
 // RegisterDeviceClient records a live command-capable device and returns cleanup.
 func (s *Server) RegisterDeviceClient(
-	ctx      context.Context,
+	ctx context.Context,
 	deviceID string,
-	conn     net.Conn,
-	client   *Client,
+	conn net.Conn,
+	client *Client,
 ) func() {
 	s.registry.RegisterClient(deviceID, conn.RemoteAddr(), client)
 
@@ -140,7 +147,7 @@ func (s *Server) RegisterDeviceClient(
 
 	if deviceStatus != nil {
 		if err := deviceStatus.MarkConnected(ctx, deviceID); err != nil {
-			s.logger.Error("mark device connected", "device_id", deviceID, "error", err)
+			s.logger.Error("mark device connected", "device_id", deviceID, "err", err)
 		}
 	}
 
@@ -148,8 +155,8 @@ func (s *Server) RegisterDeviceClient(
 		s.registry.Unregister(deviceID)
 
 		if deviceStatus != nil {
-			if err := deviceStatus.MarkDisconnected(context.Background(), deviceID); err != nil {
-				s.logger.Error("mark device disconnected", "device_id", deviceID, "error", err)
+			if err := deviceStatus.MarkDisconnected(context.WithoutCancel(ctx), deviceID); err != nil {
+				s.logger.Error("mark device disconnected", "device_id", deviceID, "err", err)
 			}
 		}
 	}
@@ -158,7 +165,7 @@ func (s *Server) RegisterDeviceClient(
 func (s *Server) Start(ctx context.Context) error {
 	listener, err := net.Listen("tcp", s.address)
 	if err != nil {
-		return err
+		return fmt.Errorf("listen for device connections on %s: %w", s.address, err)
 	}
 
 	listenerAddress := netutil.AdvertisedAddress(listener.Addr())
@@ -173,6 +180,11 @@ func (s *Server) Start(ctx context.Context) error {
 	return nil
 }
 
+// Errors reports terminal runtime failures from the TCP listener.
+func (s *Server) Errors() <-chan error {
+	return s.runtimeErrors
+}
+
 // ListenerAddress returns the reachable address reported for the active listener.
 func (s *Server) ListenerAddress() string {
 	address := s.listenerAddress.Load()
@@ -185,11 +197,19 @@ func (s *Server) ListenerAddress() string {
 
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.mu.Lock()
+	s.stopping = true
 	listener := s.listener
+	connections := make([]net.Conn, 0, len(s.connections))
+	for connection := range s.connections {
+		connections = append(connections, connection)
+	}
 	s.mu.Unlock()
 
 	if listener != nil {
 		_ = listener.Close()
+	}
+	for _, connection := range connections {
+		_ = connection.Close()
 	}
 
 	select {
@@ -201,7 +221,10 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 func (s *Server) accept(ctx context.Context, listener net.Listener) {
-	defer close(s.done)
+	defer func() {
+		s.connectionWG.Wait()
+		close(s.done)
+	}()
 
 	for {
 		conn, err := listener.Accept()
@@ -209,12 +232,35 @@ func (s *Server) accept(ctx context.Context, listener net.Listener) {
 			if errors.Is(err, net.ErrClosed) || ctx.Err() != nil {
 				return
 			}
-			s.logger.Error("accept device connection", "error", err)
-			continue
+			s.runtimeErrors <- fmt.Errorf("accept device connection: %w", err)
+			return
 		}
 
-		go s.handleConnection(ctx, conn)
+		if !s.trackConnection(conn) {
+			_ = conn.Close()
+			continue
+		}
+		s.connectionWG.Go(func() {
+			defer s.untrackConnection(conn)
+			s.handleConnection(ctx, conn)
+		})
 	}
+}
+
+func (s *Server) trackConnection(connection net.Conn) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopping {
+		return false
+	}
+	s.connections[connection] = struct{}{}
+	return true
+}
+
+func (s *Server) untrackConnection(connection net.Conn) {
+	s.mu.Lock()
+	delete(s.connections, connection)
+	s.mu.Unlock()
 }
 
 func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
@@ -234,14 +280,14 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 	if handshaker != nil {
 		handshakeSession, err := handshaker.Handshake(ctx, conn)
 		if err != nil {
-			s.logger.Error("device handshake failed", "remote", conn.RemoteAddr().String(), "error", err)
+			s.logger.Error("device handshake failed", "remote", conn.RemoteAddr().String(), "err", err)
 			return
 		}
 		deviceSession = handshakeSession
 
 		deviceClient, err = NewClient(deviceSession, conn)
 		if err != nil {
-			s.logger.Error("device client setup failed", "device_id", deviceSession.DeviceID, "error", err)
+			s.logger.Error("device client setup failed", "device_id", deviceSession.DeviceID, "err", err)
 			return
 		}
 
@@ -252,7 +298,7 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 
 	if deviceSession != nil && deviceClient != nil && handler != nil {
 		if err := s.handleSession(ctx, conn, deviceSession, deviceClient, handler); err != nil && ctx.Err() == nil {
-			s.logger.Error("device session stopped", "device_id", deviceSession.DeviceID, "error", err)
+			s.logger.Error("device session stopped", "device_id", deviceSession.DeviceID, "err", err)
 		}
 		return
 	}
@@ -261,11 +307,11 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 }
 
 func (s *Server) handleSession(
-	ctx           context.Context,
-	conn          net.Conn,
+	ctx context.Context,
+	conn net.Conn,
 	deviceSession *session.Session,
-	deviceClient  *Client,
-	handler       MessageHandler,
+	deviceClient *Client,
+	handler MessageHandler,
 ) error {
 	_ = conn.SetDeadline(time.Time{})
 	return ServeSession(ctx, conn, deviceSession, deviceClient, handler, func(deviceID string) {

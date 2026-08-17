@@ -1,5 +1,5 @@
 // Package test verifies TCP frame encoding and bounds checks.
-package test
+package framing_test
 
 import (
 	"bytes"

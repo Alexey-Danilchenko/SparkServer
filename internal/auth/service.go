@@ -7,9 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"time"
-
-	"sparkserver/internal/domain"
-	"sparkserver/internal/repository"
 )
 
 // ErrInvalidCredentials hides whether the username or password was incorrect.
@@ -20,16 +17,16 @@ type Clock func() time.Time
 
 // Service coordinates user creation, login, token storage, and bearer auth checks.
 type Service struct {
-	users         repository.UserRepository
-	tokens        repository.AccessTokenRepository
+	users         UserStore
+	tokens        AccessTokenStore
 	tokenLifetime time.Duration
 	clock         Clock
 }
 
 // NewService binds auth behavior to repository implementations.
 func NewService(
-	users         repository.UserRepository,
-	tokens        repository.AccessTokenRepository,
+	users UserStore,
+	tokens AccessTokenStore,
 	tokenLifetime time.Duration,
 ) *Service {
 	return &Service{
@@ -42,13 +39,13 @@ func NewService(
 
 // EnsureDefaultAdmin creates the fallback local admin account when no user exists.
 func (service *Service) EnsureDefaultAdmin(
-	ctx      context.Context,
+	ctx context.Context,
 	username string,
 	password string,
 ) error {
 	if _, err := service.users.GetByUsername(ctx, username); err == nil {
 		return nil
-	} else if !errors.Is(err, repository.ErrNotFound) {
+	} else if !errors.Is(err, ErrNotFound) {
 		return err
 	}
 
@@ -58,7 +55,7 @@ func (service *Service) EnsureDefaultAdmin(
 	}
 
 	now := service.clock().UTC()
-	user := domain.User{
+	user := User{
 		ID:           username,
 		Username:     username,
 		PasswordHash: passwordHash,
@@ -72,13 +69,13 @@ func (service *Service) EnsureDefaultAdmin(
 
 // Login implements the password-grant flow used by Spark/Particle-compatible clients.
 func (service *Service) Login(
-	ctx      context.Context,
+	ctx context.Context,
 	username string,
 	password string,
-) (*domain.AccessToken, error) {
+) (*AccessToken, error) {
 	user, err := service.users.GetByUsername(ctx, username)
 	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
+		if errors.Is(err, ErrNotFound) {
 			return nil, ErrInvalidCredentials
 		}
 		return nil, err
@@ -89,7 +86,7 @@ func (service *Service) Login(
 	}
 
 	now := service.clock().UTC()
-	token := domain.AccessToken{
+	token := AccessToken{
 		Token:     newToken(),
 		UserID:    user.ID,
 		Username:  user.Username,
@@ -107,13 +104,13 @@ func (service *Service) Login(
 
 // CreateUser registers a new local account with full local-cloud scope.
 func (service *Service) CreateUser(
-	ctx      context.Context,
+	ctx context.Context,
 	username string,
 	password string,
-) (*domain.User, error) {
+) (*User, error) {
 	if _, err := service.users.GetByUsername(ctx, username); err == nil {
-		return nil, repository.ErrConflict
-	} else if !errors.Is(err, repository.ErrNotFound) {
+		return nil, ErrConflict
+	} else if !errors.Is(err, ErrNotFound) {
 		return nil, err
 	}
 
@@ -123,7 +120,7 @@ func (service *Service) CreateUser(
 	}
 
 	now := service.clock().UTC()
-	user := domain.User{
+	user := User{
 		ID:           username,
 		Username:     username,
 		PasswordHash: passwordHash,
@@ -141,16 +138,16 @@ func (service *Service) CreateUser(
 
 // AuthenticateToken resolves a bearer token into the current user and token record.
 func (service *Service) AuthenticateToken(
-	ctx        context.Context,
+	ctx context.Context,
 	tokenValue string,
-) (*domain.User, *domain.AccessToken, error) {
+) (*User, *AccessToken, error) {
 	token, err := service.tokens.GetByID(ctx, tokenValue)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	if service.clock().UTC().After(token.ExpiresAt) {
-		return nil, nil, repository.ErrNotFound
+		return nil, nil, ErrNotFound
 	}
 
 	user, err := service.users.GetByID(ctx, token.UserID)
@@ -162,9 +159,9 @@ func (service *Service) AuthenticateToken(
 }
 
 func (service *Service) ListTokens(
-	ctx    context.Context,
+	ctx context.Context,
 	userID string,
-) ([]domain.AccessToken, error) {
+) ([]AccessToken, error) {
 	return service.tokens.GetByUserID(ctx, userID)
 }
 

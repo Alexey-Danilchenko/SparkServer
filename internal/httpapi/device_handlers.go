@@ -10,16 +10,39 @@ import (
 
 	"sparkserver/internal/auth"
 	"sparkserver/internal/devices"
-	"sparkserver/internal/domain"
+	"sparkserver/internal/events"
 	"sparkserver/internal/firmware"
-	"sparkserver/internal/repository"
+	"sparkserver/internal/products"
+	"sparkserver/internal/webhooks"
 )
+
+func registerDeviceRoutes(
+	router *http.ServeMux,
+	authService *auth.Service,
+	deviceService *devices.Service,
+	firmwareService FirmwareService,
+	keyRegistrar DeviceKeyRegistrar,
+) {
+	router.Handle("POST /v1/device_claims", requireAuth(authService, http.HandlerFunc(createDeviceClaimHandler(deviceService))))
+	router.HandleFunc("POST /v1/provisioning/{deviceID}", provisionDeviceHandler(authService, deviceService, keyRegistrar))
+	router.Handle("POST /v1/devices", requireAuth(authService, http.HandlerFunc(claimDeviceHandler(deviceService))))
+	router.Handle("GET /v1/devices", requireAuth(authService, http.HandlerFunc(listDevicesHandler(deviceService))))
+	router.Handle("GET /v1/devices/{deviceIDorName}", requireAuth(authService, http.HandlerFunc(getDeviceHandler(deviceService))))
+	router.Handle("GET /v1/devices/{deviceIDorName}/flash", requireAuth(authService, http.HandlerFunc(listDeviceFlashJobsHandler(deviceService, firmwareService))))
+	router.Handle("POST /v1/devices/{deviceIDorName}/flash", requireAuth(authService, http.HandlerFunc(startDeviceFlashHandler(deviceService, firmwareService))))
+	router.Handle("GET /v1/devices/{deviceIDorName}/flash/{jobID}", requireAuth(authService, http.HandlerFunc(getDeviceFlashJobHandler(deviceService, firmwareService))))
+	router.Handle("GET /v1/devices/{deviceIDorName}/{varName}", requireAuth(authService, http.HandlerFunc(getDeviceVariableHandler(deviceService))))
+	router.Handle("POST /v1/devices/{deviceIDorName}/{functionName}", requireAuth(authService, http.HandlerFunc(callDeviceFunctionHandler(deviceService))))
+	router.Handle("PUT /v1/devices/{deviceIDorName}", requireAuth(authService, http.HandlerFunc(updateDeviceHandler(deviceService, firmwareService))))
+	router.Handle("DELETE /v1/devices/{deviceIDorName}", requireAuth(authService, http.HandlerFunc(deleteDeviceHandler(deviceService))))
+	router.Handle("PUT /v1/devices/{deviceIDorName}/ping", requireAuth(authService, http.HandlerFunc(pingDeviceHandler(deviceService))))
+}
 
 func createDeviceClaimHandler(deviceService *devices.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		claim, err := deviceService.CreateClaimCode(r.Context(), userFromContext(r.Context()).ID)
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 
@@ -31,9 +54,9 @@ func createDeviceClaimHandler(deviceService *devices.Service) http.HandlerFunc {
 }
 
 func provisionDeviceHandler(
-	authService   *auth.Service,
+	authService *auth.Service,
 	deviceService *devices.Service,
-	keyRegistrar  DeviceKeyRegistrar,
+	keyRegistrar DeviceKeyRegistrar,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		request, ok := provisioningRequestFromHTTP(r)
@@ -69,7 +92,7 @@ func provisionDeviceHandler(
 
 			device, err := deviceService.Claim(r.Context(), user.ID, deviceID)
 			if err != nil {
-				writeRepositoryError(w, err)
+				writeServiceError(w, err)
 				return
 			}
 
@@ -88,7 +111,7 @@ func provisionDeviceHandler(
 			request.ClaimCode,
 		)
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 
@@ -122,7 +145,7 @@ func claimDeviceHandler(deviceService *devices.Service) http.HandlerFunc {
 
 		device, err := deviceService.Claim(r.Context(), user.ID, deviceID)
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 
@@ -135,7 +158,7 @@ func listDevicesHandler(deviceService *devices.Service) http.HandlerFunc {
 		user := userFromContext(r.Context())
 		devices, err := deviceService.List(r.Context(), user.ID)
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 
@@ -152,7 +175,7 @@ func getDeviceHandler(deviceService *devices.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		device, err := deviceService.Get(r.Context(), userFromContext(r.Context()).ID, r.PathValue("deviceIDorName"))
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 
@@ -161,7 +184,7 @@ func getDeviceHandler(deviceService *devices.Service) http.HandlerFunc {
 }
 
 func updateDeviceHandler(
-	deviceService   *devices.Service,
+	deviceService *devices.Service,
 	firmwareService FirmwareService,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -178,7 +201,7 @@ func updateDeviceHandler(
 		if request.Name != "" {
 			device, err := deviceService.Update(r.Context(), user.ID, r.PathValue("deviceIDorName"), request.Name)
 			if err != nil {
-				writeRepositoryError(w, err)
+				writeServiceError(w, err)
 				return
 			}
 			writeJSON(w, http.StatusOK, deviceResponse(device))
@@ -187,7 +210,7 @@ func updateDeviceHandler(
 
 		device, err := deviceService.Get(r.Context(), user.ID, r.PathValue("deviceIDorName"))
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 
@@ -206,7 +229,7 @@ func updateDeviceHandler(
 				return
 			}
 			if !device.Connected {
-				writeDeviceError(w, domain.ErrDeviceOffline)
+				writeDeviceError(w, devices.ErrDeviceOffline)
 				return
 			}
 
@@ -225,7 +248,7 @@ func updateDeviceHandler(
 					Reader:    request.File,
 				})
 				if err != nil {
-					writeRepositoryError(w, err)
+					writeServiceError(w, err)
 					return
 				}
 				firmwareID = uploaded.ID
@@ -237,11 +260,11 @@ func updateDeviceHandler(
 				FirmwareID: firmwareID,
 			})
 			if err != nil {
-				if errors.Is(err, domain.ErrDeviceOffline) || errors.Is(err, domain.ErrDeviceTimeout) {
+				if errors.Is(err, devices.ErrDeviceOffline) || errors.Is(err, devices.ErrDeviceTimeout) {
 					writeDeviceError(w, err)
 					return
 				}
-				writeRepositoryError(w, err)
+				writeServiceError(w, err)
 				return
 			}
 			writeJSON(w, http.StatusOK, map[string]any{"id": device.ID, "status": job.Status, "flash_job_id": job.ID})
@@ -255,7 +278,7 @@ func updateDeviceHandler(
 func deleteDeviceHandler(deviceService *devices.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err := deviceService.Unclaim(r.Context(), userFromContext(r.Context()).ID, r.PathValue("deviceIDorName")); err != nil {
-			writeRepositoryError(w, err)
+			writeServiceError(w, err)
 			return
 		}
 
@@ -513,7 +536,7 @@ func deviceNameFromRequest(r *http.Request) (string, bool) {
 	return name, name != ""
 }
 
-func deviceResponse(device *domain.Device) map[string]any {
+func deviceResponse(device *devices.Device) map[string]any {
 	response := map[string]any{
 		"id":         device.ID,
 		"name":       device.Name,
@@ -531,12 +554,22 @@ func deviceResponse(device *domain.Device) map[string]any {
 	return response
 }
 
-func writeRepositoryError(w http.ResponseWriter, err error) {
-	if errors.Is(err, repository.ErrNotFound) {
+func writeServiceError(w http.ResponseWriter, err error) {
+	if errors.Is(err, auth.ErrNotFound) ||
+		errors.Is(err, devices.ErrNotFound) ||
+		errors.Is(err, events.ErrNotFound) ||
+		errors.Is(err, firmware.ErrNotFound) ||
+		errors.Is(err, products.ErrNotFound) ||
+		errors.Is(err, webhooks.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
-	if errors.Is(err, repository.ErrConflict) {
+	if errors.Is(err, auth.ErrConflict) ||
+		errors.Is(err, devices.ErrConflict) ||
+		errors.Is(err, events.ErrConflict) ||
+		errors.Is(err, firmware.ErrConflict) ||
+		errors.Is(err, products.ErrConflict) ||
+		errors.Is(err, webhooks.ErrConflict) {
 		writeError(w, http.StatusConflict, "conflict")
 		return
 	}
@@ -552,5 +585,5 @@ func writeDeviceError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusRequestTimeout, "device_offline")
 		return
 	}
-	writeRepositoryError(w, err)
+	writeServiceError(w, err)
 }

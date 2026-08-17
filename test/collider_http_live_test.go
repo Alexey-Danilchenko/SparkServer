@@ -23,12 +23,12 @@ import (
 	"sparkserver/internal/devices"
 	"sparkserver/internal/events"
 	"sparkserver/internal/httpapi"
+	jsonfile "sparkserver/internal/jsonfile"
 	"sparkserver/internal/protocol/coap"
 	protocoldevice "sparkserver/internal/protocol/device"
 	protocolkeys "sparkserver/internal/protocol/keys"
 	"sparkserver/internal/protocol/particle"
 	"sparkserver/internal/protocol/tcp"
-	filerepo "sparkserver/internal/repository/file"
 	"sparkserver/test/collider"
 )
 
@@ -43,8 +43,8 @@ func TestColliderRandomHTTPFunctionAndVariableCallsReachVirtualDevices(t *testin
 	}
 
 	authService := auth.NewService(
-		filerepo.NewUserRepository(filepath.Join(dir, "users")),
-		filerepo.NewAccessTokenRepository(filepath.Join(dir, "tokens")),
+		jsonfile.NewUserRepository(filepath.Join(dir, "users")),
+		jsonfile.NewAccessTokenRepository(filepath.Join(dir, "tokens")),
 		24*time.Hour,
 	)
 	if _, err := authService.CreateUser(ctx, "__test__@testaccount.com", "password"); err != nil {
@@ -52,24 +52,20 @@ func TestColliderRandomHTTPFunctionAndVariableCallsReachVirtualDevices(t *testin
 	}
 
 	deviceService := devices.NewService(
-		filerepo.NewDeviceRepository(filepath.Join(dir, "devices")),
-		filerepo.NewDeviceClaimRepository(filepath.Join(dir, "deviceClaims")),
+		jsonfile.NewDeviceRepository(filepath.Join(dir, "devices")),
+		jsonfile.NewDeviceClaimRepository(filepath.Join(dir, "deviceClaims")),
+		devices.WithAPITimeout(2*time.Second),
 	)
-	deviceService.SetAPITimeout(2 * time.Second)
 	eventService := events.NewService(nil)
 	protocolHandler := protocoldevice.NewHandler(eventService, deviceService)
 	tcpServer := tcp.New("127.0.0.1:0", slog.New(slog.NewTextHandler(io.Discard, nil)))
 	tcpServer.SetDeviceStatusUpdater(deviceService)
 	deviceService.SetLiveClient(tcpServer)
 
-	httpHandler := httpapi.NewHandlerWithDeviceKeys(
-		authService,
-		deviceService,
-		eventService,
-		nil,
-		nil,
-		nil,
-		keyManager,
+	httpHandler := httpapi.NewHandler(
+		httpapi.Dependencies{
+			Auth: authService, Devices: deviceService, Events: eventService, DeviceKeys: keyManager,
+		},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
 	token := loginColliderUser(t, httpHandler)
@@ -111,12 +107,12 @@ type liveColliderDevice struct {
 }
 
 func startLiveColliderDevice(
-	ctx             context.Context,
-	t               *testing.T,
-	httpHandler     http.Handler,
-	token           string,
-	keyManager      *protocolkeys.Manager,
-	tcpServer       *tcp.Server,
+	ctx context.Context,
+	t *testing.T,
+	httpHandler http.Handler,
+	token string,
+	keyManager *protocolkeys.Manager,
+	tcpServer *tcp.Server,
 	protocolHandler *protocoldevice.Handler,
 ) *liveColliderDevice {
 	t.Helper()
@@ -148,10 +144,10 @@ func startLiveColliderDevice(
 }
 
 func registerColliderPublicKey(
-	t           *testing.T,
+	t *testing.T,
 	httpHandler http.Handler,
-	token       string,
-	identity    collider.Identity,
+	token string,
+	identity collider.Identity,
 ) {
 	t.Helper()
 
@@ -193,11 +189,11 @@ func loginColliderUser(t *testing.T, httpHandler http.Handler) string {
 }
 
 func callColliderVariable(
-	t             *testing.T,
-	httpHandler   http.Handler,
-	token         string,
+	t *testing.T,
+	httpHandler http.Handler,
+	token string,
 	virtualDevice *liveColliderDevice,
-	result        int,
+	result int,
 ) {
 	t.Helper()
 
@@ -230,12 +226,12 @@ func callColliderVariable(
 }
 
 func callColliderFunction(
-	t             *testing.T,
-	httpHandler   http.Handler,
-	token         string,
+	t *testing.T,
+	httpHandler http.Handler,
+	token string,
 	virtualDevice *liveColliderDevice,
-	iteration     int,
-	result        int,
+	iteration int,
+	result int,
 ) {
 	t.Helper()
 
@@ -276,7 +272,7 @@ func callColliderFunction(
 }
 
 func waitForHTTPResponse(
-	t         *testing.T,
+	t *testing.T,
 	responses <-chan *httptest.ResponseRecorder,
 ) *httptest.ResponseRecorder {
 	t.Helper()

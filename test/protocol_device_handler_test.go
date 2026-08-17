@@ -13,14 +13,14 @@ import (
 	"time"
 
 	"sparkserver/internal/devices"
-	"sparkserver/internal/domain"
 	"sparkserver/internal/events"
+	"sparkserver/internal/firmware"
+	jsonfile "sparkserver/internal/jsonfile"
 	"sparkserver/internal/protocol/coap"
 	protocoldevice "sparkserver/internal/protocol/device"
 	"sparkserver/internal/protocol/framing"
 	"sparkserver/internal/protocol/session"
 	"sparkserver/internal/protocol/tcp"
-	filerepo "sparkserver/internal/repository/file"
 )
 
 func TestDeviceHandlerPublishesEventPacket(t *testing.T) {
@@ -62,8 +62,8 @@ func TestDeviceHandlerPublishesEventPacket(t *testing.T) {
 func TestDeviceHandlerStoresDeviceDescription(t *testing.T) {
 	dir := t.TempDir()
 	deviceService := devices.NewService(
-		filerepo.NewDeviceRepository(filepath.Join(dir, "devices")),
-		filerepo.NewDeviceClaimRepository(filepath.Join(dir, "deviceClaims")),
+		jsonfile.NewDeviceRepository(filepath.Join(dir, "devices")),
+		jsonfile.NewDeviceClaimRepository(filepath.Join(dir, "deviceClaims")),
 	)
 	if _, err := deviceService.Claim(context.Background(), "owner-1", "device-1"); err != nil {
 		t.Fatalf("claim device: %v", err)
@@ -108,8 +108,8 @@ func TestDeviceHandlerStoresDeviceDescription(t *testing.T) {
 func TestDeviceHandlerStoresParticleAliasDescription(t *testing.T) {
 	dir := t.TempDir()
 	deviceService := devices.NewService(
-		filerepo.NewDeviceRepository(filepath.Join(dir, "devices")),
-		filerepo.NewDeviceClaimRepository(filepath.Join(dir, "deviceClaims")),
+		jsonfile.NewDeviceRepository(filepath.Join(dir, "devices")),
+		jsonfile.NewDeviceClaimRepository(filepath.Join(dir, "deviceClaims")),
 	)
 
 	handler := protocoldevice.NewHandler(nil, deviceService)
@@ -148,10 +148,10 @@ func TestDeviceHandlerStoresParticleAliasDescription(t *testing.T) {
 func TestDeviceHandlerChecksFirmwareAfterDescriptionResponse(t *testing.T) {
 	dir := t.TempDir()
 	deviceService := devices.NewService(
-		filerepo.NewDeviceRepository(filepath.Join(dir, "devices")),
-		filerepo.NewDeviceClaimRepository(filepath.Join(dir, "deviceClaims")),
+		jsonfile.NewDeviceRepository(filepath.Join(dir, "devices")),
+		jsonfile.NewDeviceClaimRepository(filepath.Join(dir, "deviceClaims")),
 	)
-	updater := &fakeDeviceFirmwareUpdater{devices: make(chan *domain.Device, 1)}
+	updater := &fakeDeviceFirmwareUpdater{devices: make(chan *devices.Device, 1)}
 
 	handler := protocoldevice.NewHandler(nil, deviceService)
 	handler.SetFirmwareUpdater(updater)
@@ -575,7 +575,7 @@ func TestTCPClientBeginFlashUsesOTABeginPacket(t *testing.T) {
 		}
 	}()
 
-	err = tcpClient.BeginFlash(context.Background(), &domain.FlashJob{
+	err = tcpClient.BeginFlash(context.Background(), &firmware.FlashJob{
 		ID:              "job-1",
 		FirmwareID:      "firmware-1",
 		FirmwareVersion: 7,
@@ -736,7 +736,7 @@ func TestTCPClientSendFlashChunkUsesOTAChunkPacket(t *testing.T) {
 		}
 	}()
 
-	err = tcpClient.BeginFlash(context.Background(), &domain.FlashJob{
+	err = tcpClient.BeginFlash(context.Background(), &firmware.FlashJob{
 		ID:        "job-1",
 		Size:      5,
 		ChunkSize: 5,
@@ -747,8 +747,8 @@ func TestTCPClientSendFlashChunkUsesOTAChunkPacket(t *testing.T) {
 
 	err = tcpClient.SendFlashChunk(
 		context.Background(),
-		&domain.FlashJob{ID: "job-1", ChunkSize: 5},
-		domain.OTAChunk{Index: 2, Offset: 1024, Size: 3, SHA256: "chunk-sha"},
+		&firmware.FlashJob{ID: "job-1", ChunkSize: 5},
+		firmware.OTAChunk{Index: 2, Offset: 1024, Size: 3, SHA256: "chunk-sha"},
 		[]byte{0x01, 0x02, 0x03},
 	)
 	if err != nil {
@@ -804,7 +804,7 @@ func TestTCPClientCompleteFlashUsesUpdateDonePacket(t *testing.T) {
 		done <- nil
 	}()
 
-	if err := tcpClient.CompleteFlash(context.Background(), &domain.FlashJob{ID: "job-1"}); err != nil {
+	if err := tcpClient.CompleteFlash(context.Background(), &firmware.FlashJob{ID: "job-1"}); err != nil {
 		t.Fatalf("complete flash: %v", err)
 	}
 
@@ -890,19 +890,19 @@ type fakeFlashSignals struct {
 }
 
 func (signals *fakeFlashSignals) RetryMissedFlashChunks(
-	_            context.Context,
-	_            string,
+	_ context.Context,
+	_ string,
 	chunkIndexes []int,
-) (*domain.FlashJob, error) {
+) (*firmware.FlashJob, error) {
 	signals.missed <- append([]int(nil), chunkIndexes...)
 	return nil, nil
 }
 
 func (signals *fakeFlashSignals) AbortDeviceFlash(
-	_       context.Context,
-	_       string,
+	_ context.Context,
+	_ string,
 	message string,
-) (*domain.FlashJob, error) {
+) (*firmware.FlashJob, error) {
 	if signals.abort != nil {
 		signals.abort <- message
 	}
@@ -910,13 +910,13 @@ func (signals *fakeFlashSignals) AbortDeviceFlash(
 }
 
 type fakeDeviceFirmwareUpdater struct {
-	devices chan *domain.Device
+	devices chan *devices.Device
 }
 
 func (updater *fakeDeviceFirmwareUpdater) CheckAndStartProductFirmwareUpdate(
-	_      context.Context,
-	device *domain.Device,
-) (*domain.FlashJob, bool, error) {
+	_ context.Context,
+	device *devices.Device,
+) (*firmware.FlashJob, bool, error) {
 	updater.devices <- device
 	return nil, false, nil
 }
