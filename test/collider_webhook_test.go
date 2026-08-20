@@ -86,7 +86,7 @@ func TestColliderVirtualDevicesPublishWebhookEvents(t *testing.T) {
 	createColliderWebhook(t, httpHandler, token, receiver.URL)
 
 	virtualDevices := make([]*liveColliderDevice, 0, 3)
-	for index := 0; index < 3; index++ {
+	for range 3 {
 		virtualDevice := startLiveColliderDevice(ctx, t, httpHandler, token, keyManager, tcpServer, protocolHandler)
 		virtualDevices = append(virtualDevices, virtualDevice)
 	}

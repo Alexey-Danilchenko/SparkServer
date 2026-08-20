@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"sort"
 	"strings"
@@ -331,9 +332,7 @@ func copyHeaders(headers map[string]string) map[string]string {
 		return nil
 	}
 	copied := make(map[string]string, len(headers))
-	for name, value := range headers {
-		copied[name] = value
-	}
+	maps.Copy(copied, headers)
 	return copied
 }
 

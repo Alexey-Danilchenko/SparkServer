@@ -247,10 +247,7 @@ func tokenHandler(authService *auth.Service) http.HandlerFunc {
 			return
 		}
 
-		expiresIn := int64(time.Until(token.ExpiresAt).Seconds())
-		if expiresIn < 0 {
-			expiresIn = 0
-		}
+		expiresIn := max(int64(time.Until(token.ExpiresAt).Seconds()), 0)
 
 		writeJSON(w, http.StatusOK, map[string]any{
 			"access_token": token.Token,

@@ -4,6 +4,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"strings"
 
@@ -437,9 +438,7 @@ func productDeviceResponse(device *products.ProductDevice) map[string]any {
 
 func productDeviceDetailResponse(device *devices.Device, link *products.ProductDevice) map[string]any {
 	response := deviceResponse(device)
-	for key, value := range productDeviceResponse(link) {
-		response[key] = value
-	}
+	maps.Copy(response, productDeviceResponse(link))
 	response["id"] = device.ID
 	response["product_id"] = link.ProductID
 	return response

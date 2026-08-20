@@ -71,7 +71,7 @@ func TestColliderRandomHTTPFunctionAndVariableCallsReachVirtualDevices(t *testin
 	token := loginColliderUser(t, httpHandler)
 
 	virtualDevices := make([]*liveColliderDevice, 0, 4)
-	for index := 0; index < 4; index++ {
+	for range 4 {
 		virtualDevice := startLiveColliderDevice(ctx, t, httpHandler, token, keyManager, tcpServer, protocolHandler)
 		virtualDevices = append(virtualDevices, virtualDevice)
 	}
@@ -83,7 +83,7 @@ func TestColliderRandomHTTPFunctionAndVariableCallsReachVirtualDevices(t *testin
 	})
 
 	random := rand.New(rand.NewSource(42))
-	for iteration := 0; iteration < 16; iteration++ {
+	for iteration := range 16 {
 		virtualDevice := virtualDevices[random.Intn(len(virtualDevices))]
 		if random.Intn(2) == 0 {
 			callColliderVariable(t, httpHandler, token, virtualDevice, 10000+iteration)

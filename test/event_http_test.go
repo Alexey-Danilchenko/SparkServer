@@ -120,8 +120,7 @@ func TestSSEReceivesPublishedEvents(t *testing.T) {
 
 func TestSSEPrefixFilter(t *testing.T) {
 	eventService := events.NewService(nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	events := eventService.Subscribe(ctx, events.Filter{Prefix: "brew."})
 	if _, err := eventService.Publish(context.Background(), eventFromTest("device.online")); err != nil {

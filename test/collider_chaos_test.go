@@ -100,7 +100,7 @@ func TestColliderChaosMonkeyThrashesVirtualDevices(t *testing.T) {
 		}
 	})
 
-	for index := 0; index < 3; index++ {
+	for range 3 {
 		addDevice()
 	}
 
@@ -111,7 +111,7 @@ func TestColliderChaosMonkeyThrashesVirtualDevices(t *testing.T) {
 	adds := len(active)
 	removes := 0
 
-	for iteration := 0; iteration < 128; iteration++ {
+	for iteration := range 128 {
 		if len(active) == 0 {
 			addDevice()
 			adds++

@@ -127,7 +127,7 @@ func TestWebhookDeliveryFailureBackoff(t *testing.T) {
 		t.Fatalf("decode webhook: %v", err)
 	}
 
-	for index := 0; index < 2; index++ {
+	for range 2 {
 		publish := authedRequest(http.MethodPost, "/v1/devices/events", `{"name":"brew.failed","data":"bad"}`, token)
 		publish.Header.Set("Content-Type", "application/json")
 		publishResponse := httptest.NewRecorder()

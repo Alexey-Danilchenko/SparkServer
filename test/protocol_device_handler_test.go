@@ -27,8 +27,7 @@ func TestDeviceHandlerPublishesEventPacket(t *testing.T) {
 	eventService := events.NewService(nil)
 	handler := protocoldevice.NewHandler(eventService)
 	deviceSession := &session.Session{DeviceID: "device-1", SessionKey: []byte("0123456789abcdef")}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	received := eventService.Subscribe(ctx, events.Filter{DeviceID: "device-1"})
 	response, err := handler.Handle(context.Background(), deviceSession, &coap.Packet{
@@ -616,7 +615,7 @@ func TestTCPClientSendFlashChunkUsesOTAChunkPacket(t *testing.T) {
 	replyPumpDone := make(chan error, 1)
 	go func() {
 		reader := framing.NewReader(server, framing.DefaultMaxFrameSize)
-		for index := 0; index < 2; index++ {
+		for range 2 {
 			responseFrame, err := reader.ReadFrame()
 			if err != nil {
 				replyPumpDone <- err
