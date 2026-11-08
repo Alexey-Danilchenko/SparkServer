@@ -48,6 +48,10 @@ MongoDB storage is deferred as a future extension after the file-backed server p
 
 ## Layout
 
+For a package-by-package guide and Mermaid diagrams of startup, authentication,
+provisioning, encrypted device sessions, live commands, events, webhooks, and
+OTA, see [`ARCHITECTURE.md`](ARCHITECTURE.md).
+
 ```text
 .
 ├── go.mod
